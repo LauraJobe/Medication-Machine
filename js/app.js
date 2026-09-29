@@ -35,8 +35,32 @@ const userName = id => { const u = db.users[id]; return u ? `${u.last}, ${u.firs
 const scenById = id => SCENARIOS.find(s => s.id === id);
 const D = () => DEVICES[(db && db.settings.device) || 'pyxis'] || DEVICES.pyxis;
 const T = k => D().L[k];
-const OMNI_TEXT = [[/<b>Remove<\/b>/g, '<b>Issue</b>'], [/→ Remove/g, '→ Issue'], [/Remove Med\b/g, 'Issue'], [/Undocumented Waste/g, 'Pending Waste'],
-  [/All Available Patients/g, 'All Patients'], [/MiniDrawer pocket/g, 'SinglePointe bin'], [/MiniDrawer/g, 'SinglePointe drawer'], [/MedStation/g, 'Omnicell']];
+const OMNI_TEXT = [
+  [/Waste Later &amp; resolve undocumented waste|Waste Later & resolve undocumented waste/g, 'Partial dose: waste it later from the Partial Dose List'],
+  [/Blind count discrepancy/g, 'Countback discrepancy'],
+  [/Perform an accurate <b>blind count<\/b> of the MiniDrawer pocket/g, 'Remove 1 Carpuject, then enter an accurate <b>countback</b> (quantity remaining in the FlexBin)'],
+  [/^Remove 1 Carpuject \(4 mg\)$/g, 'Press OK to finish the removal (1 Carpuject = 4 mg)'],
+  [/Blind count and remove 1 Carpuject/g, 'Remove 1 Carpuject and complete the countback'],
+  [/remove \+ Waste Now/g, 'remove + Waste Partial Dose'],
+  [/Remove on <b>Override<\/b>\./g, 'Override it from the <b>Stocked Meds</b> tab.'],
+  [/From Home, open <b>Discrepancies<\/b> and resolve with a recount, reason and witness/g, 'Press Main Menu → <b>Resolve Discrep</b>; use Cycle Count, a resolution reason and a witness'],
+  [/Recount, pick the matching reason, add a comment, and have your witness co-sign\./g, 'Press Cycle Count, pick a reason from List of Resolve Reasons, press Resolve Discrep, and have your witness sign.'],
+  [/Count the Carpujects you see in the open pocket BEFORE removing one\./g, 'Omnicell uses a countback: after you remove one, enter the quantity remaining in the bin.'],
+  [/Emergency \/ rapid response is the appropriate reason\./g, 'Emergency Situation is the appropriate reason.'],
+  [/Home → My Patients → Edit/g, 'Patient list → My Patients tab → Edit My Patients'],
+  [/From Home, open/g, 'From the patient list, open'],
+  [/<b>Override<\/b>/g, '<b>Remove Meds → Stocked Meds</b>'],
+  [/→ <b>Remove<\/b>/g, '→ <b>Remove Meds</b>'], [/<b>Remove<\/b>/g, '<b>Remove Meds</b>'], [/→ Remove\b/g, '→ Remove Meds'],
+  [/<b>Return<\/b>/g, '<b>Return Meds</b>'], [/→ Waste\b/g, '→ Waste Meds'], [/<b>PRN<\/b> tab/g, '<b>PRN Only</b> tab'],
+  [/<b>Undocumented Waste<\/b>/g, 'the <b>Partial Dose List</b> tab'], [/undocumented waste/gi, 'partial dose waste'],
+  [/All Available Patients/g, 'Local List'], [/<b>blind count<\/b>/g, '<b>countback</b>'], [/blind count/gi, 'countback'],
+  [/MiniDrawer pocket/g, 'FlexBin'], [/MiniDrawer/g, 'FlexBin'], [/the pocket/g, 'the bin'],
+  [/<b>Waste Now<\/b>/g, '<b>Waste Partial Dose</b>'], [/Waste Now/g, 'Waste Partial Dose'], [/<b>Waste Later<\/b>/g, '<b>Close Bin</b> without wasting'], [/Waste Later/g, 'Close Bin without wasting'],
+  [/6–8 letters\/numbers/g, '6–18 characters using 3 of: lowercase, UPPERCASE, number, symbol — e.g., Nurse#2026'],
+  [/Tap the screen, enter User ID student, then password 123456\./g, 'Tap the screen, enter User ID student, press Enter, then password 123456.'],
+  [/Sign out of the MedStation/g, 'Press Exit to log off'], [/Sign out/g, 'Press Exit to log off'], [/sign out/g, 'press Exit to log off'], [/Sign in/g, 'Log on'], [/sign in/g, 'log on'],
+  [/MedStation/g, 'cabinet'],
+];
 const devText = h => D().key === 'omnicell' ? OMNI_TEXT.reduce((t, [a, b]) => t.replace(a, b), h) : h;
 
 /* ---------- persistent state ---------- */
@@ -45,7 +69,7 @@ function freshPractice(base = db) {
   base.base = Date.now();
   base.inventory = {}; base.physical = {};
   for (const [id, m] of Object.entries(F)) { base.inventory[id] = m.count; base.physical[id] = m.count + (m.physicalOffset || 0); }
-  base.orders = {}; base.tx = []; base.removals = []; base.discrepancies = []; base.myPatients = {};
+  base.orders = {}; base.tx = []; base.removals = []; base.discrepancies = []; base.myPatients = {}; base.shortList = [];
   return base;
 }
 function freshDb() { return freshPractice({ v: 1, users: clone(USERS), settings: { challenge: false }, scen: null }); }
@@ -102,6 +126,7 @@ function startScenario(id) {
 
 /* ---------- DOM refs ---------- */
 const screenEl = $('#screen'), topbar = $('#topbar'), titlebar = $('#titlebar'), content = $('#content'), actionbar = $('#actionbar'), overlay = $('#overlay');
+const sidel = $('#sidel'), tabsbar = $('#tabsbar'), hintbar = $('#hintbar');
 
 /* ---------- pending-input machinery (for step-by-step flows and modals) ---------- */
 const pend = [];
@@ -129,9 +154,10 @@ function modal({ title, body, buttons, validate, cls = '' }) {
   if (first) setTimeout(() => first.focus(), 30);
   return waitIn(overlay, validate).then(r => { overlay.hidden = true; overlay.innerHTML = ''; return r; });
 }
-function step({ title, body, buttons, validate, after }) {
+function step({ title, body, buttons, validate, after, left = '', tabs = '', hint = '' }) {
   screenEl.className = 'screen dev-' + D().key;
   titlebar.innerHTML = titleHtml(title);
+  sidel.innerHTML = left; tabsbar.innerHTML = tabs; hintbar.innerHTML = hint;
   content.innerHTML = body + '<div class="err" role="alert" hidden></div>';
   content.scrollTop = 0;
   actionbar.innerHTML = btns(buttons);
@@ -206,7 +232,7 @@ function finishScan(el) { el.classList.remove('pressing'); el.classList.add('ok'
 document.addEventListener('pointerdown', e => {
   const s = e.target.closest('[data-scanner]'); if (!s || s.classList.contains('ok')) return;
   e.preventDefault(); s.classList.add('pressing');
-  scanTimer = setTimeout(() => { scanTimer = null; finishScan(s); }, 1400);
+  scanTimer = setTimeout(() => { scanTimer = null; finishScan(s); }, D().key === 'omnicell' ? 2000 : 1400);
 });
 const liftFinger = () => {
   const s = document.querySelector('[data-scanner].pressing'); if (!s || !scanTimer) return;
@@ -247,6 +273,12 @@ function titleHtml(t) { return t ? `<h1>${t}</h1>` : ''; }
 function undocFor(userId) { return db.removals.filter(r => r.undocumented && r.user === userId); }
 function renderTopbar() {
   const now = Date.now();
+  if (D().key === 'omnicell') {
+    const d = new Date(now), u = session.user;
+    return `<span class="of-time"><span class="clock">${pad(d.getHours())}:${pad(d.getMinutes())}</span> ${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${String(d.getFullYear()).slice(2)}</span>
+      <span class="of-brand">Color Touch · ${D().station}</span><span class="of-user">${u ? esc(`${db.users[u].first} ${db.users[u].last}`) : ''}</span>
+      <button class="btn of-exit" data-act="${u ? 'signout' : 'noop'}"${u ? '' : ' disabled'}>Exit</button>`;
+  }
   const u = session.user;
   const undoc = u ? undocFor(u).length : 0;
   const disc = db.discrepancies.filter(d => !d.resolved).length;
@@ -258,17 +290,18 @@ function renderTopbar() {
       ${u ? `<span class="tb-name">${esc(userName(u))}</span><button class="btn small ghost" data-act="home">Home</button><button class="btn small signout" data-act="signout">Sign Out</button>` : ''}
     </div>`;
 }
-setInterval(() => { const c = topbar.querySelector('.clock'); if (c) c.textContent = hhmm(Date.now()); }, 15000);
+setInterval(() => { const c = topbar.querySelector('.clock'); if (c) { const d = new Date(); c.textContent = D().key === 'omnicell' ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : hhmm(d); } }, 15000);
 
 function go(screen, extra = {}) { Object.assign(session, extra); session.screen = screen; render(); }
 function render() {
   cancelFlows();
-  const out = (SCREENS[session.screen] || SCREENS.standby)();
+  const out = ((D().key === 'omnicell' && OMNI[session.screen]) || SCREENS[session.screen] || SCREENS.standby)();
   screenEl.className = `screen dev-${D().key} ` + (out.cls || '');
   topbar.innerHTML = renderTopbar();
   titlebar.innerHTML = titleHtml(out.title);
   content.innerHTML = out.body;
   actionbar.innerHTML = out.footer || '';
+  sidel.innerHTML = out.left || ''; tabsbar.innerHTML = out.tabs || ''; hintbar.innerHTML = out.hint || '';
   content.scrollTop = 0;
   save();
   renderCoach();
@@ -356,7 +389,6 @@ const SCREENS = {
       ${undoc ? `<button class="banner blue" data-act="go" data-to="undoc"><b>You have ${T('undoc').toLowerCase()}.</b> Select to document it now (${undoc}).</button>` : ''}
       ${disc ? `<button class="banner red" data-act="go" data-to="disc"><b>Unresolved discrepancy on this device.</b> Resolve before the end of your shift.</button>` : ''}
       <div class="tiles">
-        ${D().actionFirst ? `${tile('act1', 'remove', T('remove'), 'Select the patient, then medications', 'main')}${tile('act1', 'return', 'Return', 'Unopened medications', 'main')}${tile('act1', 'waste', 'Waste', 'Controlled-substance waste', 'main')}` : ''}
         ${tile('list', 'my', 'My Patients', my ? `${my} patient${my > 1 ? 's' : ''} on your list` : 'Build your assignment list')}
         ${tile('list', 'all', T('allPts'), `${PATIENTS.length} patients on 4 West`)}
         ${tile('go', 'undoc', T('undoc'), undoc ? `${undoc} to document` : 'Nothing pending', undoc ? 'warn' : '', undoc ? `<span class="badge">${undoc}</span>` : '')}
@@ -377,7 +409,7 @@ const SCREENS = {
       const c = patientCounts(p);
       const undoc = db.removals.some(r => r.undocumented && r.patient === p.id);
       return `<div class="prow ${sel === p.id ? 'sel' : ''} ${c.past ? 'pastdue' : ''}" data-filterable="${esc(p.last + ' ' + p.first + ' ' + p.room + ' ' + p.mrn)}">
-        <button class="prow-main" data-act="${session.pending ? 'pickPt' : 'selPatient'}" data-id="${p.id}" aria-pressed="${sel === p.id}">
+        <button class="prow-main" data-act="selPatient" data-id="${p.id}" aria-pressed="${sel === p.id}">
           <span class="pr-name"><span class="pr-title"><b>${esc(patName(p))}</b>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}${p.allergies.length ? ' <span class="chip allergy">ALLERGY</span>' : ''}${undoc ? ' <span class="chip waste">UNDOC WASTE</span>' : ''}</span>
             <span class="muted small"><span class="rm-inline">Rm <span class="mono">${p.room}</span> · </span>MRN <span class="mono">${p.mrn}</span> · DOB <span class="mono">${fmtDob(p.dob)}</span></span></span>
           <span class="pr-room mono">${p.room}</span>
@@ -388,16 +420,14 @@ const SCREENS = {
       </div>`;
     }).join('');
     const dis = sel ? '' : ' disabled';
-    const pendName = { remove: T('remove'), return: 'Return', waste: 'Waste' }[session.pending];
-    return { title: pendName ? `${pendName} — Select Patient` : my ? 'My Patients' : T('allPts'), body: `
-      ${pendName ? `<p class="warnline info">Select the patient for this <b>${pendName}</b>. Verify two identifiers.</p>` : ''}
+    return { title: my ? 'My Patients' : T('allPts'), body: `
       <div class="seg" role="tablist"><button class="${my ? 'on' : ''}" data-act="list" data-to="my" role="tab" aria-selected="${my}">My Patients</button><button class="${!my ? 'on' : ''}" data-act="list" data-to="all" role="tab" aria-selected="${!my}">${T('allPts')}</button></div>
       <div class="list-tools"><input id="ptsearch" type="search" placeholder="Search last name, room or MRN" data-filter aria-label="Search patients">
         ${my ? '<button class="btn" data-act="go" data-to="editMy">Edit Patient List</button>' : ''}</div>
       ${list.length ? `<div class="ptable"><div class="phead"><span>Patient</span><span>Room</span><span class="pr-col">${T('due')}</span><span class="pr-col">PRN</span><span class="pr-col">All Orders</span></div>${rows}</div>
         <p class="legend"><span class="dot mini"></span> due now · <span class="dot mini past"></span> past due (orange bar) · tap a dot to open that tab</p>`
       : `<div class="empty"><b>Your My Patients list is empty.</b><p>Select <b>Edit Patient List</b> and add the patients you are assigned to today.</p><button class="btn primary" data-act="go" data-to="editMy">Edit Patient List</button></div>`}`,
-      footer: pendName ? `<button class="btn" data-act="home">Main Menu</button>` : `<button class="btn" data-act="pa" data-a="remove"${dis}>${T('remove')}</button><button class="btn" data-act="pa" data-a="return"${dis}>Return</button><button class="btn" data-act="pa" data-a="waste"${dis}>Waste</button><button class="btn override" data-act="pa" data-a="override"${dis}>Override</button><button class="btn" data-act="pa" data-a="past"${dis}>${T('past')}</button>` };
+      footer: `<button class="btn" data-act="pa" data-a="remove"${dis}>${T('remove')}</button><button class="btn" data-act="pa" data-a="return"${dis}>Return</button><button class="btn" data-act="pa" data-a="waste"${dis}>Waste</button><button class="btn override" data-act="pa" data-a="override"${dis}>Override</button><button class="btn" data-act="pa" data-a="past"${dis}>${T('past')}</button>` };
   },
 
   editMy() {
@@ -545,18 +575,28 @@ function addTx(t) { db.tx.push({ id: uid(), t: Date.now(), user: session.user, .
 
 /* ---------- actions ---------- */
 const ACT = {
-  signin: () => signInFlow(),
-  home: () => { session.editList = null; session.pending = null; go('home'); },
-  act1: ds => { const my = (db.myPatients[session.user] || []).length; go('patients', { pending: ds.to, listTab: my ? 'my' : 'all', sel: null }); },
-  pickPt: ds => { session.sel = ds.id; patientAction(session.pending); },
+  signin: () => isOmni() ? omniSignIn() : signInFlow(),
+  home: () => { session.editList = null; go('home'); },
   signout: () => signOut(),
   go: ds => go(ds.to),
   noop: () => {},
+  openPt: ds => { session.sel = ds.id; go('pt'); },
+  olist: ds => go('patients', { listTab: ds.t }),
+  osort: () => { session.sortRoom = !session.sortRoom; render(); },
+  otab: ds => { if (ds.t === 'stocked' && session.tab !== 'stocked') emit('patient_action', { patient: session.sel, action: 'override' }); session.tab = ds.t; render(); },
+  pickStocked: ds => omniSelectStocked(ds.id),
+  unpickKey: ds => { session.cart = session.cart.filter(c => c.key !== ds.key); render(); },
+  cancelMedList: () => { session.cart = []; render(); },
+  inactiveOrder: ds => { const o = orderById(ds.id); info('Inactive Med Order', `<p><b>${esc(medLabel(o.med))}</b> ${esc(sig(o))}</p><p>This med order cannot be issued because it is not time to administer it to the patient (next due ${hhmm(orderStatus(o).due)}).</p>`); },
+  allergyInfo: () => { const p = PAT(session.sel); info('Allergy Info', p.allergies.length ? `<ul>${p.allergies.map(a => `<li><b>${esc(a.agent)}</b> — ${esc(a.reaction)}</li>`).join('')}</ul>` : '<p>No known allergies are displayed. Check the MAR.</p>'); },
+  retTab: ds => { session.retAll = ds.all === '1'; render(); },
+  wasteTab: ds => { session.wasteTab = ds.t; render(); },
+  oRep: ds => { session.oRep = ds.t; render(); },
   list: ds => go('patients', { listTab: ds.to }),
   selPatient: ds => { session.sel = ds.id; render(); },
   dot: ds => { session.sel = ds.id; patientAction('remove', ds.tab); },
   pa: ds => patientAction(ds.a),
-  backList: () => go('patients', { cart: [] }),
+  backList: () => go(isOmni() ? 'pt' : 'patients', { cart: [] }),
   tab: ds => { session.tab = ds.tab; render(); },
   mode: ds => { session.mode = ds.m; if (ds.m === 'remove' && !session.tab) session.tab = 'due'; if (ds.m === 'override') emit('patient_action', { patient: session.sel, action: 'override' }); render(); },
   addMy: ds => { if (!session.editList.includes(ds.id)) session.editList.push(ds.id); render(); },
@@ -585,7 +625,7 @@ function signOut() {
   if (!session.user) return;
   emit('signout', {});
   cancelFlows();
-  session.user = null; session.sel = null; session.cart = []; session.editList = null; session.alerted = null; session.pending = null;
+  session.user = null; session.sel = null; session.cart = []; session.editList = null; session.alerted = null;
   go('standby');
 }
 
@@ -598,8 +638,10 @@ async function patientAction(action, tab) {
   emit('patient_action', { patient: p.id, action });
   if (action === 'remove' || action === 'override') {
     session.mode = action; session.cart = [];
-    if (tab) session.tab = tab;
-    else { const c = patientCounts(p); session.tab = c.due ? 'due' : 'all'; }
+    const c = patientCounts(p);
+    if (isOmni()) session.tab = c.due ? 'sched' : 'active';
+    else if (tab) session.tab = tab;
+    else session.tab = c.due ? 'due' : 'all';
     go('profile');
   } else go({ return: 'returns', waste: 'waste', past: 'past' }[action]);
 }
@@ -634,7 +676,7 @@ async function signInFlow() {
     if (!ok) return go('standby');
     method = 'password';
   }
-  session.user = user.id;
+  session.user = user.id; session.loginMethod = method;
   if (user.mustChange) { const ok = await changePasswordFlow(user, true); if (!ok) { session.user = null; return go('standby'); } }
   if (!user.bioid && !user.bioPrompted) {
     user.bioPrompted = true; save();
@@ -677,15 +719,25 @@ async function bioLogin(user) {
   }
 }
 
+function passwordProblem(user, np) {
+  if (!isOmni()) return /^[A-Za-z0-9]{6,8}$/.test(np) ? null : 'New password must be 6–8 letters or numbers.';
+  if (np.length < 6 || np.length > 18) return 'Passwords must be 6 to 18 characters.';
+  if (/^\s|\s$/.test(np)) return 'Spaces are not allowed as the first or last character.';
+  const kinds = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9\s]/].filter(r => r.test(np)).length;
+  if (kinds < 3) return 'Strong password required: use 3 of the 4 elements — lowercase, UPPERCASE, number, special character.';
+  if ([user.first, user.last, user.id].some(n => n && n.length >= 3 && np.toLowerCase().includes(n.toLowerCase()))) return 'Passwords should not contain your name or User ID.';
+  return null;
+}
 async function changePasswordFlow(user, forced) {
-  const r = await step({ title: forced ? 'Create a New Password' : 'Change Password', body: `<div class="signin">
+  const r = await step({ title: forced ? 'Create a New Password' : isOmni() ? 'Change Your Password' : 'Change Password', body: `<div class="signin">
       ${forced ? '<p>This is your first sign-in. Replace the temporary password from pharmacy with your own.</p>' : ''}
       <label for="cur">Current password</label><input id="cur" type="password" autocomplete="current-password">
-      <label for="np">New password</label><input id="np" type="password" autocomplete="new-password" maxlength="8">
-      <label for="np2">Confirm new password</label><input id="np2" type="password" autocomplete="new-password" maxlength="8">
-      <p class="muted">6–8 letters or numbers. Never share your password or sign in for someone else.</p></div>`,
+      <label for="np">New password</label><input id="np" type="password" autocomplete="new-password" maxlength="${isOmni() ? 18 : 8}">
+      <label for="np2">Confirm new password</label><input id="np2" type="password" autocomplete="new-password" maxlength="${isOmni() ? 18 : 8}">
+      <p class="muted">${isOmni() ? 'Strong password: 6–18 characters using 3 of 4 elements (lowercase, UPPERCASE, number, special character). Do not use your name or common words.' : '6–8 letters or numbers.'} Never share your password or sign in for someone else.</p></div>`,
+    ...(isOmni() ? { hint: 'Enter your old password, then the new password twice. Passwords are case sensitive.', left: '' } : {}),
     buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Accept', value: 'ok', primary: true }],
-    validate: (v, d) => d.cur !== user.password ? 'Current password is incorrect.' : !/^[A-Za-z0-9]{6,8}$/.test(d.np) ? 'New password must be 6–8 letters or numbers.' : d.np === user.password ? 'Choose a password different from the current one.' : d.np !== d.np2 ? 'The new passwords do not match.' : null });
+    validate: (v, d) => d.cur !== user.password ? 'Current password is incorrect.' : passwordProblem(user, d.np) ? passwordProblem(user, d.np) : d.np === user.password ? 'Choose a password different from the current one.' : d.np !== d.np2 ? 'The new passwords do not match.' : null });
   if (r.value !== 'ok') return false;
   user.password = r.data.np; user.mustChange = false; save();
   return true;
@@ -706,6 +758,7 @@ async function createUserFlow() {
 }
 
 async function registerBioFlow(user) {
+  if (isOmni()) return omniEnroll(user);
   const choose = await modal({ title: 'Register BioID', body: `<p>Choose how to enroll your fingerprint.</p>
       <label class="radio"><input type="radio" name="how" value="sim" checked> <span><b>${D().name} BioID scanner (simulated)</b><br><span class="muted">Press and hold the on-screen scanner three times, like the real enrollment.</span></span></label>
       <label class="radio"><input type="radio" name="how" value="device"${deviceBioOk ? '' : ' disabled'}> <span><b>This phone or laptop's fingerprint / Face ID</b><br><span class="muted">${deviceBioOk ? 'Uses your device\'s built-in biometrics. Nothing leaves your device.' : 'Not available in this browser.'}</span></span></label>`,
@@ -803,23 +856,30 @@ async function askDose(medId, { min, max, override }) {
 function cartItem(medId, dose, extra) {
   const m = F[medId];
   const qty = m.noSplit ? 1 : Math.max(1, Math.ceil(dose / m.strength - 1e-9));
-  return { med: medId, dose, qty, ...extra };
+  return { med: medId, dose, qty, key: (extra && extra.orderId) || 'ov-' + medId, ...extra };
 }
 
 async function selectOrder(oid) {
   const o = orderById(oid), p = PAT(session.sel), m = F[o.med];
   if (session.cart.some(c => c.orderId === oid)) return toast(`Already in ${T('selected')}.`);
   const s = orderStatus(o);
-  const cont = async (title, body) => (await modal({ title, cls: 'alert', body, buttons: [{ label: 'Continue', value: 'go' }, { label: 'Cancel', value: 'no', primary: true }] })).value === 'go';
+  const cont = async (title, body) => (await modal({ title, cls: 'alert', body, buttons: [{ label: isOmni() ? 'OK' : 'Continue', value: 'go' }, { label: 'Cancel', value: 'no', primary: true }] })).value === 'go';
+  if (isOmni()) {
+    const h = freqHours(o.freq), last = lastIssue(p.id, o.med);
+    if (last && (s.kind === 'given' || (s.kind === 'prn' && h && Date.now() - last < h * HOUR)) &&
+      !await cont('<span class="alert-title">Last Issued Alert</span>', `<p>This item was recently issued on <b>${oDate(last)}</b>. Do you want to continue?</p><p class="muted">Order: ${esc(o.freq)}${o.prn ? ' PRN' : ''}. Check the MAR before continuing.</p>`)) return;
+  } else {
   if (s.kind === 'given' && !await cont('<span class="alert-title">Dose Already Removed</span>', `<p>This scheduled dose was removed at <b>${hhmm(s.at)}</b> by ${esc(userName(s.by))}. Removing it again could cause a <b>double dose</b>.</p><p class="muted">Check the MAR before continuing.</p>`)) return;
   if (s.kind === 'future' && !await cont('Early Removal', `<p>This dose is not due until <b>${hhmm(s.due)}</b>. Removing more than 60 minutes early is outside the administration window.</p>`)) return;
   if (s.kind === 'prn' && s.last) {
     const h = freqHours(o.freq);
     if (h && Date.now() - s.last < h * HOUR && !await cont('<span class="alert-title">Too Soon</span>', `<p>${esc(medLabel(o.med))} was last removed at <b>${hhmm(s.last)}</b>. The order is <b>${o.freq} PRN</b>; the next dose is available at <b>${hhmm(s.last + h * HOUR)}</b>.</p>`)) return;
   }
+  }
   const c = await askCdc(o.med, p.id); if (!c.ok) return;
   let dose = o.dose;
   if (dose == null) { dose = await askDose(o.med, { min: o.doseMin, max: o.doseMax }); if (dose == null) return; }
+  else if (isOmni() && !await omniConfirmQty(o.med, dose)) return;
   session.cart.push(cartItem(o.med, dose, { orderId: oid, override: false, note: c.note }));
   render();
 }
@@ -853,7 +913,7 @@ async function runRemoval() {
   const items = [...session.cart];
   if (!items.length) return;
   let reason = null;
-  if (items.some(i => i.override)) {
+  if (!isOmni() && items.some(i => i.override)) {
     const r = await modal({ title: 'Override Warning', cls: 'alert', body: `<p>You are removing medication <b>without pharmacist review</b> of the order. Select the reason for the override.</p>
         ${OVERRIDE_REASONS.map((x, i) => `<label class="radio"><input type="radio" name="reason" value="${esc(x)}"${i ? '' : ''}> <span>${esc(x)}</span></label>`).join('')}`,
       buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: T('removeMeds'), value: 'ok', primary: true }],
@@ -864,16 +924,16 @@ async function runRemoval() {
   }
   const done = [];
   for (const it of items) {
-    const res = await removeItem(p, it, reason);
+    const res = isOmni() ? await omniRemoveItem(p, it) : await removeItem(p, it, reason);
     if (res) done.push(res);
   }
   session.cart = [];
   const lines = done.map(d => `<li><b>${esc(medLabel(d.med))}</b> — removed ${d.qty} ${unitWord(d.med, d.qty)} for a dose of ${num(d.dose)} ${F[d.med].unit}${d.wasteNote ? `<br><span class="muted">${d.wasteNote}</span>` : ''}</li>`).join('');
-  await step({ title: 'Transaction Complete', body: `${patientBanner(p)}
+  await step({ title: isOmni() ? `Remove Complete — ${esc(p.last)}, ${esc(p.first)}` : 'Transaction Complete', body: `${patientBanner(p)}
       ${done.length ? `<ul class="summary">${lines}</ul>` : '<p>No medications were removed.</p>'}
       <div class="teach"><b>At the bedside:</b> verify the rights of medication administration, scan the patient's ID band and each medication barcode, then document on the eMAR. Label any syringe that leaves your hands.</div>`,
     buttons: [{ label: 'Done', value: 'ok', primary: true }] });
-  if (D().actionFirst) { session.pending = null; go('home'); } else go('patients');
+  go(D().key === 'omnicell' ? 'pt' : 'patients');
 }
 
 async function removeItem(p, it, reason) {
@@ -909,8 +969,13 @@ async function removeItem(p, it, reason) {
       <p class="muted">Take the medication, check the label against the order, then close the ${m.loc.type === 'Fridge' ? 'refrigerator bin' : 'drawer'}.</p>`,
     buttons: [{ label: 'Cancel Med', value: 'cancel' }, { label: `${T('remove')} & Close Drawer`, value: 'ok', primary: true }] });
   if (r.value !== 'ok') return null;
-
   db.inventory[it.med] -= it.qty; db.physical[it.med] -= it.qty;
+  return afterRemoval(p, it, reason, countNote);
+}
+
+// Bookkeeping after the item leaves the drawer; shared by both cabinet types.
+async function afterRemoval(p, it, reason, countNote) {
+  const m = F[it.med];
   const removedAmt = it.qty * m.strength;
   const expectedWaste = m.noSplit ? 0 : Math.max(0, +(removedAmt - it.dose).toFixed(4));
   const rem = { id: uid(), t: Date.now(), user: session.user, patient: p.id, med: it.med, orderId: it.orderId, qty: it.qty, dose: it.dose, override: it.override, expectedWaste: m.controlled ? expectedWaste : 0, wasted: 0, returnedQty: 0, undocumented: false };
@@ -920,7 +985,13 @@ async function removeItem(p, it, reason) {
   emit('removed', { patient: p.id, med: it.med, override: it.override, dose: it.dose, qty: it.qty });
 
   let wasteNote = countNote;
-  if (m.controlled && expectedWaste > 0) {
+  if (m.controlled && expectedWaste > 0 && isOmni()) {
+    const w = await modal({ title: 'Partial Dose', body: `<p>Intended dose <b>${amtText(it.med, it.dose)}</b>; you removed <b>${amtText(it.med, removedAmt)}</b>.</p>
+        <p>Press <b>Waste Partial Dose</b> to record the ${db.settings.challenge ? 'waste' : `waste of <b>${amtText(it.med, expectedWaste)}</b>`} now with a witness. If you close the bin without wasting, this issue goes on the <b>Partial Dose List</b> and must be wasted later.</p>`,
+      buttons: [{ label: 'Close Bin', value: 'later' }, { label: 'Waste Partial Dose', value: 'now', primary: true }] });
+    if (w.value === 'now' && await omniWasteFlow(rem)) wasteNote = [countNote, `Partial dose wasted: ${amtText(it.med, rem.wasted)} with ${esc(userName(rem.witness))}.`].filter(Boolean).join(' ');
+    else { rem.undocumented = true; emit('waste_later', { med: it.med, patient: p.id }); wasteNote = [countNote, 'Partial dose not wasted — it is on the Partial Dose List. Waste it with a witness from Waste Meds.'].filter(Boolean).join(' '); }
+  } else if (m.controlled && expectedWaste > 0) {
     const w = await modal({ title: 'Waste Required', body: `<p>You removed <b>${amtText(it.med, removedAmt)}</b> and will administer <b>${amtText(it.med, it.dose)}</b>.</p>
         ${db.settings.challenge ? '<p>Calculate the amount you must waste.</p>' : `<p>Amount to waste: <b>${amtText(it.med, expectedWaste)}</b></p>`}
         <p class="muted">By law, the unused portion of a controlled substance must be wasted and documented with a witness.</p>`,
@@ -942,6 +1013,7 @@ async function removeItem(p, it, reason) {
 
 /* ---------- waste ---------- */
 async function wasteFlow(rem, synthetic = false) {
+  if (isOmni()) return omniWasteFlow(rem, synthetic);
   const m = F[rem.med], id = rem.med;
   const removedAmt = (rem.qty - (rem.returnedQty || 0)) * m.strength;
   const expected = Math.max(0, +(rem.expectedWaste - rem.wasted).toFixed(4));
@@ -999,6 +1071,7 @@ async function searchAllWaste() {
 
 /* ---------- return ---------- */
 async function returnFlow(rem) {
+  if (isOmni()) return omniReturnFlow(rem);
   const m = F[rem.med], left = rem.qty - rem.returnedQty;
   const r = await modal({ title: `Return · ${esc(medLabel(rem.med))}`, body: `<p>${esc(medDesc(rem.med))} — removed ${rem.qty} ${unitWord(rem.med, rem.qty)} at ${hhmm(rem.t)}.</p>
       <p class="muted">Return only unopened, intact packages.</p>
@@ -1024,6 +1097,7 @@ async function returnFlow(rem) {
 
 /* ---------- discrepancy resolution ---------- */
 async function resolveDiscrepancy(d) {
+  if (isOmni()) return omniResolve(d);
   const recent = db.tx.filter(t => t.med === d.med).sort((a, b) => b.t - a.t).slice(0, 8);
   const r1 = await step({ title: `Resolve Discrepancy · ${esc(medLabel(d.med))}`, body: `
       <dl class="facts"><dt>Location</dt><dd>${locText(d.med)}</dd><dt>Expected count</dt><dd>${d.expected}</dd><dt>Count entered</dt><dd>${d.counted}</dd><dt>Created</dt><dd>${hhmm(d.t)} by ${esc(userName(d.user))}</dd></dl>
@@ -1050,6 +1124,454 @@ async function resolveDiscrepancy(d) {
   go('disc');
 }
 
+/* =====================================================================
+ * Omnicell Color Touch mode — follows the Omnicell Color Touch 22.5 user guide:
+ * log on (User ID + password or fingerprint, Short List), patient lists
+ * (Global / Local / Partial Dose / My Patients), patient screen, Remove Meds tabs,
+ * Stocked Meds override, countback (quantity remaining), Waste Partial Dose,
+ * Return Meds / Waste Meds with Patient Medication Accounts, Resolve Discrep.
+ * ===================================================================== */
+const isOmni = () => D().key === 'omnicell';
+const oSide = list => list.map(([label, attrs, cls = '']) => `<button type="button" class="btn obtn ${cls}" ${attrs}>${label}</button>`).join('');
+const oDate = t => { const d = new Date(t); return `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${String(d.getFullYear()).slice(2)} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const oMenuItems = [['pc', 'Patient Care', 'patients'], ['rep', 'Reports', 'reports'], ['rd', 'Resolve Discrep', 'disc'], ['inv', 'Inventory Menus', null], ['um', 'User Menus', 'prefs'], ['am', 'Admin Menus', null]];
+function oMenu(active, loggedOn = true) {
+  const disc = db.discrepancies.some(d => !d.resolved);
+  return oMenuItems.map(([k, l, to]) => {
+    const flash = k === 'rd' && disc ? ' flash' : '';
+    if (!loggedOn) return `<button type="button" class="otab menu${flash}" ${k === 'rd' && disc ? 'data-resolve="disc" data-novalidate' : 'disabled'}>${l}</button>`;
+    return `<button type="button" class="otab menu${active === k ? ' on' : ''}${flash}" ${to ? `data-act="go" data-to="${to}"` : 'disabled title="Not part of this practice simulator"'}>${l}</button>`;
+  }).join('');
+}
+const oTitle = (t, p) => `${t}${p ? `<span class="o-allergy">Allergies: ${p.allergies.length ? esc(allergyText(p)) : 'None known — check MAR'}</span>` : ''}`;
+function lastIssue(pid, medId) { const r = db.removals.filter(x => x.patient === pid && x.med === medId).sort((a, b) => b.t - a.t)[0]; return r ? r.t : null; }
+function outstandingOf(rem) { const m = F[rem.med]; return +((rem.qty - (rem.returnedQty || 0)) * m.strength - rem.wasted - (rem.adminDone ? rem.dose : 0)).toFixed(4); }
+
+const OMNI = {
+  standby() {
+    const disc = db.discrepancies.some(d => !d.resolved);
+    return { cls: 'standby', body: `<button class="standby-btn" data-act="signin">
+        <span class="sb-kicker">${D().station} · 4 West Medical-Surgical</span>
+        <span class="sb-title">Omnicell XT</span>
+        <span class="sb-sub">Touch the screen to log on</span>
+        ${disc ? '<span class="sb-disc">Discrepancy exists — press Resolve Discrep after you log on</span>' : ''}
+        <span class="sb-time mono">${hhmm(Date.now())}</span></button>` };
+  },
+
+  home() {
+    return { title: 'Main Menu', body: '<div class="o-center">Choose menu option…</div>', hint: 'Select main menu option from the buttons below.',
+      tabs: oMenu(''), left: oSide([['Previous Screen', 'data-act="go" data-to="patients"', 'back']]) };
+  },
+
+  patients() {
+    const u = session.user;
+    const tab = ['global', 'local', 'partial', 'my'].includes(session.listTab) ? session.listTab : 'local';
+    let ids = PATIENTS.map(p => p.id);
+    if (tab === 'my') ids = db.myPatients[u] || [];
+    if (tab === 'partial') ids = ids.filter(id => db.removals.some(r => r.undocumented && r.patient === id));
+    const list = ids.map(PAT).filter(Boolean).sort((a, b) => session.sortRoom ? a.room.localeCompare(b.room) : (a.last.localeCompare(b.last) || a.first.localeCompare(b.first)));
+    const rows = list.map(p => {
+      const partial = db.removals.some(r => r.undocumented && r.patient === p.id);
+      return `<button class="orow pt" data-act="openPt" data-id="${p.id}" data-filterable="${esc(p.last + ' ' + p.first + ' ' + p.room + ' ' + p.mrn)}">
+        <span><b>${esc(p.last)}, ${esc(p.first)}</b>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}${partial ? ' <span class="chip waste">PARTIAL DOSE</span>' : ''}<br>PtID: <span class="mono">${p.mrn}</span><br>MRN: <span class="mono">${p.mrn}-4W</span></span>
+        <span class="o-mid"><br><br>DOB: <span class="mono">${fmtDob(p.dob)}</span></span>
+        <span>Rm#: <span class="mono">${p.room}</span><br>Pt.Type: INP<br>Area: 4W</span></button>`;
+    }).join('');
+    const empty = tab === 'my' ? 'Your My Patients list is empty. Press <b>Edit My Patients</b> to add your assigned patients.' : tab === 'partial' ? 'No patients have partial dose issues that require waste.' : 'No patients found.';
+    return { title: 'Patient List:', body: `<input type="search" id="ptsearch" class="o-search" placeholder="Type the first few letters of the last name" data-filter aria-label="Search patients">
+        <div class="olist">${rows || `<p class="empty-line">${empty}</p>`}</div>`,
+      hint: tab === 'partial' ? 'Partial Dose List: patients with undocumented medication issues. Select the patient, then press Waste Meds.' : 'Select a patient from the list. To search for a patient, enter the first few characters of the last name. If the patient is not found, look in the Global List.',
+      tabs: [['global', 'Global List'], ['local', 'Local List'], ['partial', 'Partial Dose List'], ['my', 'My Patients']].map(([k, l]) => `<button type="button" class="otab${tab === k ? ' on' : ''}" data-act="olist" data-t="${k}">${l}</button>`).join(''),
+      left: oSide([['Main Menu', 'data-act="home"'], ['Add New Patient', 'disabled title="Not part of this practice simulator"'], ['Find Item', 'data-act="go" data-to="find"'], ...(tab === 'my' ? [['Edit My Patients', 'data-act="go" data-to="editMy"']] : [])]),
+      footer: oSide([[session.sortRoom ? 'Sort by Name' : 'Sort by Room', 'data-act="osort"']]) };
+  },
+
+  pt() {
+    const p = PAT(session.sel);
+    if (!p) return OMNI.patients();
+    return { title: oTitle(`Patient: ${esc(p.last)}, ${esc(p.first)} ${p.mi}`, p), body: `<dl class="facts o-facts">
+        <dt>Patient ID:</dt><dd class="mono">${p.mrn}</dd><dt>Patient Type:</dt><dd>INP</dd><dt>Med. Rec. #:</dt><dd class="mono">${p.mrn}-4W</dd>
+        <dt>Date of Birth:</dt><dd class="mono">${fmtDob(p.dob)} (${age(p.dob)} y, ${p.sex})</dd><dt>Physician:</dt><dd>${esc(p.provider)}</dd><dt>Area:</dt><dd>4W</dd><dt>Room:</dt><dd class="mono">${p.room}</dd><dt>Diagnosis:</dt><dd>${esc(p.dx)}</dd></dl>
+        ${p.nameAlert ? '<p class="warnline">Name alert: another patient on this unit has a similar name. Verify two identifiers.</p>' : ''}`,
+      hint: 'Select Remove Meds, Return Meds or Waste Meds. Verify the patient with two identifiers first.',
+      left: oSide([['Previous Screen', 'data-act="go" data-to="patients"', 'back'], ['Allergy Info', 'data-act="allergyInfo"'], ['Transaction History', 'data-act="pa" data-a="past"']]),
+      footer: oSide([['Remove Meds', 'data-act="pa" data-a="remove"', 'go'], ['Return Meds', 'data-act="pa" data-a="return"'], ['Waste Meds', 'data-act="pa" data-a="waste"']]) };
+  },
+
+  profile() {
+    const p = PAT(session.sel), cart = session.cart, tab = session.tab;
+    const inCart = key => cart.find(c => c.key === key);
+    const row = ({ key, act, id, medId, line2, right, dim, icons = '' }) => {
+      const c = inCart(key);
+      return `<div class="orow med${c ? ' sel' : ''}${dim ? ' dim' : ''}" data-filterable="${esc(F[medId].name + ' ' + F[medId].brand)}">
+        <button type="button" class="oqty" ${c ? `data-act="unpickKey" data-key="${key}" aria-label="Deselect ${esc(medLabel(medId))}"` : 'tabindex="-1" aria-hidden="true"'}>${c ? `[${c.qty}]` : ''}</button>
+        <button type="button" class="omain" data-act="${act}" data-id="${id}"><span><b>${esc(medLabel(medId))} ${esc(medDesc(medId))}</b>${icons}<br>${line2}</span><span class="oright">${right}</span></button></div>`;
+    };
+    const issuedTxt = (medId, warn) => { const t = lastIssue(p.id, medId); return t ? `<span class="${warn ? 'o-red' : ''}">Issued: ${oDate(t)}</span>` : '<span class="muted">Item has not been issued</span>'; };
+    const oIcons = o => `${F[o.med].controlled ? ' <span class="chip cs" title="Witness required for waste">W</span>' : ''}${o.prn ? ' <span class="chip">PRN</span>' : ''}${o.dose == null ? ' <span class="chip">RANGE</span>' : ''}`;
+    let listHtml = '';
+    if (tab === 'stocked') {
+      listHtml = Object.keys(F).sort((a, b) => F[a].name.localeCompare(F[b].name)).map(id => row({ key: 'ov-' + id, act: 'pickStocked', id, medId: id,
+        line2: `${esc(locText(id))}${F[id].override ? '' : ' · <span class="o-red">Override not permitted</span>'}`, right: `On hand ${db.inventory[id]}`, dim: !F[id].override && !p.orders.some(o => o.med === id),
+        icons: F[id].controlled ? ` <span class="chip cs">${F[id].controlled}</span>` : '' })).join('');
+    } else if (tab === 'display') {
+      listHtml = cart.map(c => row({ key: c.key, act: 'noop', id: c.key, medId: c.med, line2: `Dose: ${num(c.dose)} ${F[c.med].unit.toUpperCase()}${c.override ? ' · <b class="o-red">OVERRIDE</b> — ' + esc(c.reason || '') : ''}`, right: `Qty ${c.qty}` })).join('');
+    } else {
+      const orders = p.orders.filter(o => { const s = orderStatus(o);
+        if (tab === 'inactive') return s.kind === 'future';
+        if (tab === 'prn') return s.kind === 'prn';
+        if (tab === 'sched') return s.kind === 'due' || s.kind === 'pastdue';
+        return s.kind !== 'future'; });
+      listHtml = orders.map(o => { const s = orderStatus(o); const h = freqHours(o.freq);
+        const recent = (s.kind === 'given') || (s.kind === 'prn' && s.last && h && Date.now() - s.last < h * HOUR);
+        const due = s.kind === 'due' ? ` · Due ${hhmm(s.due)}` : s.kind === 'pastdue' ? ' · <b class="o-red">PAST DUE ' + hhmm(s.due) + '</b>' : s.kind === 'future' ? ` · Not due until ${hhmm(s.due)}` : '';
+        return row({ key: o.id, act: tab === 'inactive' ? 'inactiveOrder' : 'pickOrder', id: o.id, medId: o.med, dim: tab === 'inactive', icons: oIcons(o),
+          line2: `Dose: ${doseText(o)} ${F[o.med].unit.toUpperCase()} &nbsp; ${esc(F[o.med].route)} ${esc(o.freq.toUpperCase())}${o.prn ? ' PRN ' + esc(o.prn) : ''}${due}`, right: issuedTxt(o.med, recent) }); }).join('');
+    }
+    const tabs = [['display', 'Display Meds to Remove'], ['stocked', 'Stocked Meds'], ['active', 'Active Med Orders'], ['inactive', 'Inactive Med Orders'], ['prn', 'PRN Only'], ['sched', 'Scheduled Meds']];
+    return { title: oTitle(`Remove Meds for: ${esc(p.last)}, ${esc(p.first)}`, p), body: `<input type="search" id="medsearch" class="o-search" placeholder="Type the first letters of the medication" data-filter aria-label="Search medications">
+        <div class="olist">${listHtml || '<p class="empty-line">No items on this tab.</p>'}</div>`,
+      hint: tab === 'stocked' ? 'Stocked Meds: every item in this cabinet. Selecting an item that is not on the patient\'s active med orders is an OVERRIDE.' : 'Select the medication to remove. Any med order displayed in grey is not available. Deselect an item by pressing the quantity indicator to the left of any selected item.',
+      tabs: tabs.map(([k, l]) => `<button type="button" class="otab${tab === k ? ' on' : ''}" data-act="otab" data-t="${k}">${l}</button>`).join(''),
+      left: cart.length ? oSide([['Cancel Med List', 'data-act="cancelMedList"', 'red']]) : oSide([['Previous Screen', 'data-act="go" data-to="pt"', 'back']]),
+      footer: oSide([['Remove Now', `data-act="removeMeds"${cart.length ? '' : ' disabled'}`, 'go']]) };
+  },
+
+  returns() {
+    const p = PAT(session.sel), all = session.retAll;
+    const list = db.removals.filter(r => r.patient === p.id && (all || r.user === session.user) && Date.now() - r.t < 72 * HOUR && r.qty - r.returnedQty > 0).sort((a, b) => b.t - a.t);
+    const rows = list.map(r => { const why = r.wasted > 0 ? 'Opened / partly wasted — cannot return' : '';
+      return `<button class="orow med1${why ? ' dim' : ''}" data-act="${why ? 'why' : 'doReturn'}" data-id="${r.id}" data-why="${esc(why)}"><span><b>${esc(medLabel(r.med))} ${esc(medDesc(r.med))}</b><br>Issued ${oDate(r.t)} by ${esc(userName(r.user))} · qty ${r.qty - r.returnedQty}${why ? ` · <span class="o-red">${why}</span>` : ''}</span><span class="oright">Outstanding: ${amtText(r.med, outstandingOf(r))}</span></button>`; }).join('');
+    return { title: oTitle(`Return Meds for: ${esc(p.last)}, ${esc(p.first)}`, p), body: `<div class="olist">${rows || '<p class="empty-line">No open issues to return. Press All Meds to see issues by all users.</p>'}</div>`,
+      hint: 'Meds Eligible to Return lists your open Patient Medication Accounts (PMAs). Return unused items before recording any waste.',
+      tabs: `<button type="button" class="otab${!all ? ' on' : ''}" data-act="retTab" data-all="0">Meds Eligible to Return</button><button type="button" class="otab${all ? ' on' : ''}" data-act="retTab" data-all="1">All Meds</button>`,
+      left: oSide([['Previous Screen', 'data-act="go" data-to="pt"', 'back']]) };
+  },
+
+  waste() {
+    const p = PAT(session.sel), t = session.wasteTab || 'req';
+    const base = db.removals.filter(r => r.patient === p.id && F[r.med].controlled && outstandingOf(r) > 0);
+    const list = (t === 'req' ? base.filter(r => r.undocumented || r.expectedWaste - r.wasted > 1e-6) : base).sort((a, b) => b.t - a.t);
+    const rows = list.map(r => `<button class="orow med1" data-act="doWaste" data-id="${r.id}"><span><b>${esc(medLabel(r.med))} ${esc(medDesc(r.med))}</b><br>Issued ${oDate(r.t)} by ${esc(userName(r.user))} · intended dose ${num(r.dose)} ${F[r.med].unit}</span><span class="oright">Outstanding: ${amtText(r.med, outstandingOf(r))}</span></button>`).join('');
+    return { title: oTitle(`Waste Meds for: ${esc(p.last)}, ${esc(p.first)}`, p), body: `<div class="olist">${rows || '<p class="empty-line">No items require waste on this tab.</p>'}</div>`,
+      hint: 'Select the item to waste. You must enter a waste reason, and a witness must watch the waste. Complete any returns first.',
+      tabs: `<button type="button" class="otab${t === 'req' ? ' on' : ''}" data-act="wasteTab" data-t="req">Meds Requiring Waste</button><button type="button" class="otab${t === 'all' ? ' on' : ''}" data-act="wasteTab" data-t="all">All Meds</button><button type="button" class="otab" data-act="searchAllWaste">Stocked Meds</button>`,
+      left: oSide([['Previous Screen', 'data-act="go" data-to="pt"', 'back']]) };
+  },
+
+  past() {
+    const p = PAT(session.sel);
+    return { title: oTitle(`Transaction History: ${esc(p.last)}, ${esc(p.first)}`, p), body: txTable(db.tx.filter(t => t.patient === p.id).sort((a, b) => b.t - a.t)),
+      hint: 'All transactions for this patient at this cabinet.', left: oSide([['Previous Screen', 'data-act="go" data-to="pt"', 'back']]) };
+  },
+
+  undoc() { session.listTab = 'partial'; session.screen = 'patients'; return OMNI.patients(); },
+
+  disc() {
+    const open = db.discrepancies.filter(d => !d.resolved), done = db.discrepancies.filter(d => d.resolved);
+    const row = d => `<button class="orow med1${d.resolved ? ' dim' : ''}" data-act="${d.resolved ? 'noop' : 'resolveDisc'}" data-id="${d.id}"><span><b>${esc(medLabel(d.med))} ${esc(medDesc(d.med))}</b><br>Found by ${esc(userName(d.user))} at ${oDate(d.t)} · Qty Expected ${d.expected} · Qty Found ${d.counted}</span><span class="oright">${d.resolved ? 'Resolved' : '<b class="o-red">OPEN</b>'}</span></button>`;
+    return { title: 'Resolve Discrepancies', body: `<div class="olist">${open.map(row).join('') || '<p class="empty-line">No open discrepancies.</p>'}${done.map(row).join('')}</div>`,
+      hint: 'Finding a discrepancy does not mean it is yours — only that it must be addressed. Resolve discrepancies by the end of the shift in which they were found.',
+      tabs: oMenu('rd'), left: oSide([['Previous Screen', 'data-act="go" data-to="patients"', 'back']]) };
+  },
+
+  find() { const o = SCREENS.find(); return { ...o, title: 'Find Item — Check Item Availability', footer: '', hint: 'Locations and quantities on this cabinet.', left: oSide([['Previous Screen', 'data-act="go" data-to="patients"', 'back']]) }; },
+
+  reports() {
+    const t = session.oRep || 'user';
+    let body;
+    if (t === 'disc') body = db.discrepancies.length ? `<div class="table-wrap"><table class="tx"><thead><tr><th>Found</th><th>Item</th><th>Found by</th><th>Users with previous access</th><th>Expected / Found</th><th>Status</th></tr></thead><tbody>${db.discrepancies.map(d => `<tr><td class="mono">${oDate(d.t)}</td><td>${esc(medLabel(d.med))}</td><td>${esc(userName(d.user))}</td><td>${[...new Set(db.tx.filter(x => x.med === d.med && x.t <= d.t).map(x => userName(x.user)))].map(esc).join(', ') || '—'}</td><td class="mono">${d.expected} / ${d.counted}</td><td>${d.resolved ? 'Resolved' : 'Open'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty-line">No discrepancies.</p>';
+    else if (t === 'waste') { const l = db.removals.filter(r => r.undocumented); body = l.length ? `<div class="table-wrap"><table class="tx"><thead><tr><th>Issued</th><th>Patient</th><th>Item</th><th>User</th><th>Waste due</th></tr></thead><tbody>${l.map(r => `<tr><td class="mono">${oDate(r.t)}</td><td>${esc(patName(PAT(r.patient)))}</td><td>${esc(medLabel(r.med))}</td><td>${esc(userName(r.user))}</td><td class="mono">${amtText(r.med, r.expectedWaste - r.wasted)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty-line">No waste-required items.</p>'; }
+    else body = txTable(db.tx.filter(x => t === 'all' || x.user === session.user).sort((a, b) => b.t - a.t));
+    session.reportAll = t === 'all';
+    return { title: 'Cabinet Reports', body, hint: 'Use Discrepancy by User to find users with previous access to an item when researching a discrepancy.',
+      tabs: [['user', 'Transaction by User'], ['all', 'All Transactions'], ['disc', 'Discrepancy by User'], ['waste', 'Waste Required Items']].map(([k, l]) => `<button type="button" class="otab${t === k ? ' on' : ''}" data-act="oRep" data-t="${k}">${l}</button>`).join(''),
+      left: oSide([['Main Menu', 'data-act="home"']]), footer: oSide([['Copy Report', 'data-act="copyReport"']]) };
+  },
+
+  prefs() {
+    const u = db.users[session.user], viaFinger = session.loginMethod === 'bioid' || session.loginMethod === 'device';
+    return { title: 'User Menus', body: `<div class="prefs">
+      <div class="pref"><div><b>Change Your Password</b><span class="muted">6–18 characters with 3 of 4: lowercase, UPPERCASE, number, special character. Do not use your name or common words.</span></div><button class="btn" data-act="changePw">Change Your Password</button></div>
+      ${u.bioid ? `<div class="pref"><div><b>Re-enroll Your Fingerprint</b><span class="muted">${viaFinger ? 'Primary and alternate fingers. Clean the scanner first.' : 'Only available when you log on by scanning your enrolled fingerprint.'}</span></div><button class="btn" data-act="regBio"${viaFinger ? '' : ' disabled'}>Re-enroll Your Fingerprint</button></div>`
+        : `<div class="pref"><div><b>Enroll Fingerprint (practice registrar)</b><span class="muted">At a facility, a designated fingerprint registrar enrolls you. Here you can practice the enrollment yourself.</span></div><button class="btn" data-act="regBio">Enroll Fingerprint</button></div>`}
+      <div class="pref"><div><b>This device's fingerprint / Face ID</b><span class="muted">${u.deviceCred ? 'Linked on this device.' : deviceBioOk ? 'Available on this device.' : 'Not available in this browser. Use the simulated scanner.'}</span></div>
+        ${u.deviceCred ? '<button class="btn" data-act="unlinkDevice">Unlink</button>' : `<button class="btn" data-act="linkDevice"${deviceBioOk ? '' : ' disabled'}>Link Device</button>`}</div></div>`,
+      tabs: oMenu('um'), left: oSide([['Main Menu', 'data-act="home"']]) };
+  },
+
+  editMy() { const o = SCREENS.editMy(); return { ...o, hint: 'Tap a patient on the left to add them to My Patients. Press Accept when finished.' }; },
+};
+
+/* ---------- Omnicell log on ---------- */
+function oLogonBody(uid, stage, msg, err) {
+  return `<div class="o-logon"><div class="o-brand">Omnicell XT · Color Touch</div><p class="o-welcome">Welcome! Please Enter:</p>
+    <div class="o-logon-grid"><div>
+      <label for="uid">User ID:</label><input id="uid" autocomplete="username" autocapitalize="none" spellcheck="false" value="${esc(uid)}" class="${err === 'uid' ? 'hl' : ''}"${stage === 'pw' ? ' readonly' : ''}>
+      ${stage === 'pw' ? '<label for="pw">Password:</label><input id="pw" type="password" autocomplete="current-password">' : ''}
+    </div>${scannerHtml(msg)}</div>${credHint()}</div>`;
+}
+async function omniSignIn() {
+  let uid = '', stage = 'id', fails = 0, err = '';
+  let msg = 'Scan your fingerprint at any time. Place your finger <b>flat</b> on the sensor for at least <b>two seconds</b>.';
+  let user = null, method = null;
+  for (;;) {
+    const r = await step({ title: `${D().station} · MED1<span class="o-sub">4 West Medical-Surgical</span>`, body: oLogonBody(uid, stage, msg, err),
+      hint: 'Please enter your user ID and Password if required. Press the Enter key when you are finished typing a user ID or password. You may scan your fingerprint at any time.',
+      tabs: oMenu('', false), left: stage === 'pw' ? oSide([['Previous Screen', 'data-resolve="back" data-novalidate', 'back']]) : oSide([['Cancel', 'data-resolve="cancel" data-novalidate', 'back']]),
+      buttons: [{ label: 'Create Practice User', value: 'create', novalidate: true }, { label: 'Enter', value: 'enter', primary: true }] });
+    err = '';
+    const typed = (r.data.uid || '').toLowerCase();
+    if (r.value === 'cancel') return go('standby');
+    if (r.value === 'back') { stage = 'id'; continue; }
+    if (r.value === 'create') { await createUserFlow(); continue; }
+    if (r.value === 'disc') { await info('Discrepancy', '<p>An open discrepancy exists on this cabinet. Log on, then press <b>Main Menu → Resolve Discrep</b>.</p>'); continue; }
+    if (r.value === 'scan-ok') {
+      const cand = typed && db.users[typed] ? db.users[typed] : (!typed ? (db.shortList || []).map(id => db.users[id]).find(x => x && x.bioid) : null);
+      if (!cand) { msg = typed ? '<span class="bad">Fingerprint not recognized.</span> Check your User ID.' : '<span class="bad">Enter User ID first.</span> You are not on this cabinet\'s Short List. Enter your User ID, then scan.'; err = 'uid'; uid = typed; continue; }
+      if (!cand.bioid) { msg = '<span class="bad">No fingerprint enrolled for this user.</span> Log on with User ID and password.'; uid = cand.id; continue; }
+      user = cand; method = 'bioid'; break;
+    }
+    if (r.value === 'scan-fail') {
+      fails++; uid = typed;
+      msg = fails >= 3 ? '<span class="bad">Fingerprint not recognized.</span> Enter your User ID and password.' : '<span class="bad">Try Again.</span> Place the same finger flat and centered for at least two seconds — do not roll it.';
+      continue;
+    }
+    if (r.value === 'enter') {
+      if (!typed || !db.users[typed]) { msg = typed ? `<span class="bad">User ID "${esc(typed)}" was not found.</span>` : '<span class="bad">Enter your User ID.</span>'; err = 'uid'; uid = typed; stage = 'id'; continue; }
+      uid = typed;
+      if (stage === 'id') { stage = 'pw'; msg = 'Enter your password, or scan your fingerprint.'; continue; }
+      if (r.data.pw !== db.users[typed].password) { msg = '<span class="bad">Invalid password.</span> Passwords may be case sensitive — check Caps Lock.'; continue; }
+      user = db.users[typed]; method = 'password'; break;
+    }
+  }
+  session.user = user.id; session.loginMethod = method;
+  db.shortList = [user.id, ...(db.shortList || []).filter(x => x !== user.id)].slice(0, 8);
+  if (user.mustChange) { const ok = await changePasswordFlow(user, true); if (!ok) { session.user = null; return go('standby'); } }
+  if (undocFor(user.id).length) await info('Log-on Message', '<p><b>You Have Partial Dose Issues That Require Waste.</b></p><p class="muted">See the Partial Dose List tab, then select the patient and press Waste Meds.</p>');
+  emit('signin', { user: user.id, method });
+  go('patients', { listTab: (db.myPatients[user.id] || []).length ? 'my' : 'local', sel: null });
+  toast(`Logged on: ${db.users[user.id].first} ${db.users[user.id].last}`);
+}
+
+async function omniEnroll(user) {
+  const choose = await modal({ title: 'Fingerprint Enrollment', body: `<p>Choose how to enroll.</p>
+      <label class="radio"><input type="radio" name="how" value="sim" checked> <span><b>Cabinet fingerprint sensor (simulated)</b><br><span class="muted">2 practice scans, then 4 enrollment scans of your primary finger. Hold each scan about 2 seconds.</span></span></label>
+      <label class="radio"><input type="radio" name="how" value="device"${deviceBioOk ? '' : ' disabled'}> <span><b>This phone or laptop's fingerprint / Face ID</b><br><span class="muted">${deviceBioOk ? 'Uses your device\'s built-in biometrics.' : 'Not available in this browser.'}</span></span></label>`,
+    buttons: [{ label: 'Cancel', value: 'cancel' }, { label: 'Next', value: 'ok', primary: true }] });
+  if (choose.value !== 'ok') return false;
+  if (choose.data.how === 'device') return linkDevice(user);
+  const fingers = ['Right index', 'Right middle'];
+  for (let f = 0; f < 2; f++) {
+    const plan = [['Practice scan', 2], ['Enrollment scan', 4]];
+    for (const [label, n] of plan) {
+      let i = 1, msg = '';
+      while (i <= n) {
+        const r = await modal({ title: `${f ? 'Alternate' : 'Primary'} finger: ${fingers[f]}`, body: `<p class="muted">${label} ${i} of ${n}</p>${scannerHtml(msg || 'Center the core (swirl) of your fingerprint on the sensor. Place it flat for at least two seconds, then lift. Do not roll your finger.')}`, buttons: [{ label: 'Cancel', value: 'cancel' }] });
+        if (r.value === 'cancel') return false;
+        if (r.value === 'scan-fail') { msg = '<span class="bad">Poor quality scan.</span> Fill the whole sensor and hold still for two seconds.'; continue; }
+        msg = ''; i++;
+      }
+    }
+    if (f === 0) {
+      const nx = await modal({ title: 'Primary Finger Enrolled', body: '<p>Enroll an alternate finger too? Either finger can then be used to log on.</p>', buttons: [{ label: 'Enroll Alternate', value: 'alt' }, { label: 'Finish', value: 'finish', primary: true }] });
+      if (nx.value === 'finish') break;
+    }
+  }
+  user.bioid = true; save();
+  await info('Enrollment Complete', '<p>Your fingerprint is enrolled. At the start of each shift, enter your User ID and scan to get on this cabinet\'s <b>Short List</b>; after that you can log on with a fingerprint scan only.</p>', 'Finish');
+  return true;
+}
+
+/* ---------- Omnicell remove / countback ---------- */
+async function omniConfirmQty(medId, dose) {
+  const m = F[medId], q = cartItem(medId, dose, {}).qty;
+  const r = await modal({ title: `${esc(medLabel(medId))}`, body: `<p>${esc(medDesc(medId))}</p><dl class="facts"><dt>Intended Dose:</dt><dd><b>${num(dose)} ${m.unit.toUpperCase()}</b></dd><dt>Quantity to Remove:</dt><dd><b>${q} ${unitWord(medId, q)}</b></dd></dl>`,
+    buttons: [{ label: 'Cancel', value: 'cancel' }, { label: 'OK', value: 'ok', primary: true }] });
+  return r.value === 'ok';
+}
+
+async function omniSelectStocked(medId) {
+  const p = PAT(session.sel), m = F[medId];
+  if (session.cart.some(c => c.key === 'ov-' + medId)) return toast('Already selected — see Display Meds to Remove.');
+  const existing = p.orders.find(o => o.med === medId || F[o.med].name === m.name);
+  if (existing) {
+    const r = await modal({ title: 'Active Med Order Exists', body: `<p>This item is on the patient's active med orders:</p><p><b>${esc(medLabel(existing.med))}</b> ${esc(sig(existing))}</p><p class="muted">Select it from Active Med Orders so the pharmacist-verified order is used.</p>`,
+      buttons: [{ label: 'Override Anyway', value: 'ov' }, { label: 'Go to Active Med Orders', value: 'go', primary: true }] });
+    emit('order_exists', { med: medId, action: r.value });
+    if (r.value === 'go') { session.tab = existing.prn ? 'prn' : 'active'; return render(); }
+  } else if (!m.override) return info('Override Not Permitted', `<p>${esc(medLabel(medId))} cannot be overridden at this cabinet. Contact pharmacy.</p>`);
+  const yes = await modal({ title: 'Override', body: `<p>Do you wish to override <b>${esc(medLabel(medId))}</b>?</p><p class="muted">The medication will be removed without a pharmacist-reviewed order.</p>`, buttons: [{ label: 'No', value: 'no' }, { label: 'Yes', value: 'yes', primary: true }] });
+  if (yes.value !== 'yes') return;
+  const allergy = p.allergies.find(a => (ALLERGY_CLASSES[a.key] || []).includes(medId));
+  if (allergy) {
+    const r = await modal({ title: '<span class="alert-title">Allergy Alert</span>', cls: 'alert', body: `<p><b>${esc(patName(p))}</b> has a documented allergy to <b>${esc(allergy.agent)}</b> (${esc(allergy.reaction)}).</p><p>You selected <b>${esc(medLabel(medId))}</b>.</p><p class="muted">Stop and clarify with the prescriber before giving any medication the patient is allergic to.</p>`,
+      buttons: [{ label: 'Override Allergy', value: 'proceed', cls: 'danger' }, { label: 'Cancel', value: 'cancel', primary: true }] });
+    emit('allergy_alert', { patient: p.id, med: medId, action: r.value });
+    if (r.value !== 'proceed') return toast('Override cancelled. Clarify the order with the prescriber.');
+  }
+  const rr = await modal({ title: `Remove Meds for: ${esc(p.last)}, ${esc(p.first)} — Select Override Reason`, body: `${OMNI_OVERRIDE_REASONS.map(x => `<label class="radio"><input type="radio" name="reason" value="${esc(x)}"> <span>${esc(x)}</span></label>`).join('')}
+      <label for="ovtext">Enter Override Reason (if none of the reasons apply)</label><input id="ovtext">`,
+    buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'OK', value: 'ok', primary: true }],
+    validate: (v, d) => d.reason || (d.ovtext || '').length > 2 ? null : 'Select the reason for the override, or enter your own.' });
+  if (rr.value !== 'ok') return;
+  const reason = rr.data.ovtext && !rr.data.reason ? rr.data.ovtext : rr.data.reason;
+  const c = await askCdc(medId, p.id); if (!c.ok) return;
+  const dose = await askDose(medId, { override: true }); if (dose == null) return;
+  emit('override_reason', { reason });
+  session.cart.push(cartItem(medId, dose, { key: 'ov-' + medId, orderId: null, override: true, reason, note: [reason, c.note].filter(Boolean).join(' · ') }));
+  session.tab = 'display';
+  render();
+}
+
+async function omniRemoveItem(p, it) {
+  const m = F[it.med], who = `${esc(p.last)}, ${esc(p.first)}`;
+  if (db.physical[it.med] < it.qty) { await info('Insufficient Quantity', `<p>There are not enough ${esc(medLabel(it.med))} in this bin. Press <b>Find Item</b> to check availability in other cabinets, and notify pharmacy.</p>`); return null; }
+  const r = await step({ title: `Removing Meds for ${who}`, body: `${drawerView(it.med, { contents: m.controlled ? 'items' : 'label' })}
+      <div class="take"><div class="take-n">${it.qty}</div><div><b>Remove ${it.qty} ${unitWord(it.med, it.qty)}</b> of ${esc(medLabel(it.med))} ${esc(medDesc(it.med))}<br><span class="muted">Intended dose: ${num(it.dose)} ${m.unit}${it.override ? ' · OVERRIDE' : ''}</span></div></div>`,
+    hint: 'Follow the guiding lights. Open the drawer with the blinking green LED, open the lit bin and remove the item. Press OK when you have removed it.',
+    buttons: [{ label: 'Skip Item', value: 'skip' }, { label: 'OK', value: 'ok', primary: true }] });
+  if (r.value !== 'ok') return null;
+  db.inventory[it.med] -= it.qty; db.physical[it.med] -= it.qty;
+  let countNote = '';
+  if (m.controlled) {
+    const c = await step({ title: `Removing Meds for ${who}`, body: `${drawerView(it.med, { contents: 'items' })}
+        <div class="count-box"><dl class="facts"><dt>Quantity Removed:</dt><dd><b>${it.qty} EA</b></dd></dl><label for="count">Quantity Remaining:</label><div class="inline"><input id="count" type="number" inputmode="numeric" min="0"><span>EA</span></div></div>`,
+      hint: 'Countback: enter the correct quantity remaining in the bin after removing the med(s).',
+      buttons: [{ label: 'OK', value: 'ok', primary: true }],
+      validate: (v, d) => d.count === '' || isNaN(parseInt(d.count, 10)) ? 'Enter the quantity remaining in the bin.' : null });
+    const n = parseInt(c.data.count, 10), sys = db.inventory[it.med], phys = db.physical[it.med];
+    emit('count', { med: it.med, correct: n === phys });
+    if (n !== sys) {
+      db.discrepancies.push({ id: uid(), t: Date.now(), med: it.med, user: session.user, patient: p.id, expected: sys, counted: n, resolved: false });
+      addTx({ type: 'Discrepancy', patient: p.id, med: it.med, amount: `exp ${sys} / found ${n}`, note: 'Countback mismatch' });
+      db.inventory[it.med] = n;
+      emit('discrepancy_created', { med: it.med });
+      countNote = 'Discrepancy created at countback — press Main Menu → Resolve Discrep before the end of your shift.';
+      await info('<span class="alert-title">Discrepancy</span>', `<p>The quantity remaining you entered (<b>${n}</b>) does not match the quantity the cabinet expected. A discrepancy has been created.</p><p>The <b>Resolve Discrep</b> button is now active. Resolve it by the end of your shift.</p>`, 'OK', 'alert');
+    }
+  }
+  return afterRemoval(p, it, null, countNote);
+}
+
+/* ---------- Omnicell waste / return / discrepancy ---------- */
+async function omniWasteFlow(rem, synthetic = false) {
+  const m = F[rem.med], id = rem.med, p = PAT(rem.patient), ch = db.settings.challenge, liquid = !!m.volume;
+  const outstanding = outstandingOf(rem);
+  if (outstanding <= 0) { await info('Nothing to Waste', '<p>This Patient Medication Account is reconciled.</p>'); return false; }
+  const expected = Math.max(0, +(rem.expectedWaste - rem.wasted).toFixed(4));
+  const r = await modal({ title: `Wasting Meds for ${esc(p.last)}, ${esc(p.first)}`, body: `<h3 class="o-item">${esc(medLabel(id))} ${esc(medDesc(id))}</h3>
+      <dl class="facts"><dt>Outstanding Issued Amount:</dt><dd><b>${num(outstanding)} ${m.unit.toUpperCase()}</b></dd></dl>
+      <label for="admin">Administration Amount (${m.unit})</label><div class="inline"><input id="admin" type="number" inputmode="decimal" step="any" ${rem.adminDone ? 'value="0" readonly' : ch ? '' : `value="${num(rem.dose)}"`}><span>${m.unit.toUpperCase()}</span></div>
+      <label for="wamt">Waste Amount (${m.unit})</label><div class="inline"><input id="wamt" type="number" inputmode="decimal" step="any" ${ch ? '' : `value="${num(expected)}"`} data-volfor="${liquid && !ch ? id : ''}"><span>${m.unit.toUpperCase()}</span> <span class="vol-out mono">${liquid && !ch ? `= ${num(volOf(id, expected))} mL` : ''}</span></div>
+      ${liquid ? `<p class="small muted">Volume Converter: ${num(m.strength / m.volume)} ${m.unit}/mL.${ch ? ' Enter the volume you will waste.' : ''}</p>` : ''}
+      ${ch && liquid ? '<label for="wvol">Waste Volume (mL)</label><div class="inline"><input id="wvol" type="number" inputmode="decimal" step="any"><span>mL</span></div>' : ''}
+      <label for="wreason">Waste Reason</label><select id="wreason"><option value="">— List of Reasons —</option>${OMNI_WASTE_REASONS.map(x => `<option>${esc(x)}</option>`).join('')}</select>`,
+    buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'OK', value: 'ok', primary: true }],
+    validate: (v, d) => {
+      const a = parseFloat(d.admin), w = parseFloat(d.wamt);
+      if (isNaN(a) || a < 0) return 'Enter the Administration Amount (enter 0 if none was given).';
+      if (isNaN(w) || w < 0) return 'Enter the Waste Amount.';
+      if (a + w > outstanding + 1e-6) return `Administration + Waste (${num(a + w)}) cannot be greater than the Outstanding Issued Amount (${num(outstanding)} ${m.unit}).`;
+      if (a + w < outstanding - 1e-6) return `Administration + Waste (${num(a + w)}) is less than the Outstanding Issued Amount (${num(outstanding)} ${m.unit}). ${num(outstanding - a - w)} ${m.unit} would stay open on your PMA — recheck your amounts.`;
+      if (ch && liquid) { const vol = parseFloat(d.wvol); if (isNaN(vol) || Math.abs(vol - volOf(id, w)) > 0.011) return `The volume does not match ${num(w)} ${m.unit} at ${num(m.strength / m.volume)} ${m.unit}/mL. Volume = amount ÷ concentration.`; }
+      if (!d.wreason) return 'You must provide a waste reason. Select one from the List of Reasons.';
+      return null;
+    } });
+  if (r.value !== 'ok') return false;
+  const a = parseFloat(r.data.admin), w = parseFloat(r.data.wamt);
+  const wit = await witnessFlow(`Have your witness enter their User ID and password to witness the waste of <b>${amtText(id, w)}</b> of ${esc(medLabel(id))}.`);
+  if (!wit) return false;
+  const bin = await modal({ title: 'Waste Contents', body: '<p>Do you want to place the waste contents into the return bin?</p>', buttons: [{ label: 'No', value: 'no' }, { label: 'Yes', value: 'yes', primary: true }] });
+  await info(bin.value === 'yes' ? 'Access Return Bin Now' : 'Record Waste Now', bin.value === 'yes'
+    ? `<p>With <b>${esc(userName(wit))}</b> watching, place the waste in the return bin and close the lid. Enclose the waste receipt if your facility requires it.</p>`
+    : `<p>With <b>${esc(userName(wit))}</b> watching, waste <b>${amtText(id, w)}</b> per hospital policy (e.g., controlled-substance waste container).</p>`, 'Done');
+  if (!rem.adminDone) { rem.dose = a; rem.adminDone = true; rem.expectedWaste = +((rem.qty - (rem.returnedQty || 0)) * m.strength - a).toFixed(4); }
+  rem.wasted = +(rem.wasted + w).toFixed(4); rem.witness = wit;
+  rem.undocumented = outstandingOf(rem) > 1e-6;
+  addTx({ type: 'Waste', patient: rem.patient, med: id, amount: amtText(id, w), witness: wit, note: `${r.data.wreason}; admin ${num(a)} ${m.unit}${synthetic ? '; misc. waste' : ''}` });
+  emit('waste', { med: id, amount: w, patient: rem.patient, witness: wit });
+  toast(`Waste recorded: ${amtText(id, w)}`, 'good');
+  return true;
+}
+
+async function omniReturnFlow(rem) {
+  const m = F[rem.med], p = PAT(rem.patient), left = rem.qty - rem.returnedQty, outstanding = outstandingOf(rem);
+  const r = await modal({ title: `Return Meds for ${esc(p.last)}, ${esc(p.first)}`, body: `<h3 class="o-item">${esc(medLabel(rem.med))} ${esc(medDesc(rem.med))}</h3>
+      <dl class="facts"><dt>Outstanding Issued Amount:</dt><dd><b>${num(outstanding)} ${m.unit.toUpperCase()}</b> (${left} ${unitWord(rem.med, left)})</dd></dl>
+      <label for="radmin">Administration Amount (${m.unit}) — enter 0 if none was given</label><div class="inline"><input id="radmin" type="number" inputmode="decimal" step="any" value="0"><span>${m.unit.toUpperCase()}</span></div>
+      <label for="rq">Quantity to Return</label><div class="inline"><input id="rq" type="number" inputmode="numeric" min="1" max="${left}" value="${left}"><span>EA</span></div>
+      <label for="rreason">Return reason</label><select id="rreason"><option value="">— select —</option><option>Patient refused</option><option>Dose held</option><option>Order discontinued</option><option>Patient transferred or discharged</option></select>
+      <label class="check"><input type="checkbox" id="sealed"> The package is sealed and unopened</label>`,
+    buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Return Now', value: 'ok', primary: true }],
+    validate: (v, d) => { const q = parseInt(d.rq, 10), a = parseFloat(d.radmin);
+      if (!(q >= 1 && q <= left)) return `Enter a Quantity to Return from 1 to ${left}.`;
+      if (isNaN(a) || a < 0) return 'Enter the Administration Amount (0 if none).';
+      if (a + q * m.strength > outstanding + 1e-6) return 'The administration and return amounts combined cannot be greater than the outstanding issued amount.';
+      if (!d.sealed) return 'Only unopened items can be returned. Waste an opened controlled substance instead.';
+      if (!d.rreason) return 'Select a return reason.';
+      return null; } });
+  if (r.value !== 'ok') return;
+  const q = parseInt(r.data.rq, 10);
+  let witness = null;
+  if (m.controlled) { witness = await witnessFlow(`Have your witness enter their User ID and password for the return of <b>${q} ${unitWord(rem.med, q)}</b> of ${esc(medLabel(rem.med))}.`); if (!witness) return; }
+  await step({ title: `Return Meds for ${esc(p.last)}, ${esc(p.first)}`, body: `<div class="drawer-view"><div class="dv-loc"><span class="light"></span><div><b>External Return Bin</b><span class="muted">Follow the screen prompt: open the return bin and place the contents inside.</span></div></div>
+      <div class="return-art" aria-hidden="true"><div class="return-slot">${Array.from({ length: q }, () => unitIcon(rem.med)).join('')}</div><span>RETURN BIN</span></div></div>
+      <p>Place <b>${q} ${unitWord(rem.med, q)}</b> in the return bin${witness ? ` while ${esc(userName(witness))} watches` : ''}, close the lid, then press OK.</p>`,
+    hint: 'Returns made to the return bin are reconciled by pharmacy.', buttons: [{ label: 'OK', value: 'ok', primary: true }] });
+  rem.returnedQty += q;
+  if (rem.returnedQty >= rem.qty) { rem.expectedWaste = 0; rem.undocumented = false; if (rem.orderId && db.orders[rem.orderId]) delete db.orders[rem.orderId].given; }
+  addTx({ type: 'Return', patient: rem.patient, med: rem.med, amount: `${q} ${unitWord(rem.med, q)}`, witness, note: `${r.data.rreason}; return bin` });
+  emit('returned', { med: rem.med, patient: rem.patient, qty: q });
+  toast('Return recorded.', 'good');
+  go('returns');
+}
+
+async function omniResolve(d) {
+  let reason = '', counted = false;
+  const prev = () => { const t = db.tx.filter(x => x.med === d.med && x.user !== d.user && x.t <= d.t).sort((a, b) => b.t - a.t)[0]; return t ? userName(t.user) : '—'; };
+  for (;;) {
+    const r = await step({ title: 'Discrepancy Resolution', body: `<dl class="facts o-facts">
+        <dt>Patient Name:</dt><dd>${d.patient ? esc(patName(PAT(d.patient))) : 'FLOOR STOCK'}</dd><dt>Item:</dt><dd><b>${esc(medLabel(d.med))} ${esc(medDesc(d.med))}</b></dd>
+        <dt>Found by:</dt><dd>${esc(userName(d.user))}</dd><dt>Found at:</dt><dd class="mono">${oDate(d.t)}</dd><dt>Previous User:</dt><dd>${esc(prev())}</dd>
+        <dt>Qty Expected:</dt><dd class="mono">${d.expected} EA</dd><dt>Qty Found:</dt><dd class="mono">${d.counted} EA</dd><dt>${d.counted >= d.expected ? 'Adj Up' : 'Adj Down'}:</dt><dd class="mono">${Math.abs(d.counted - d.expected)} EA</dd>
+        <dt>Qty Remaining:</dt><dd class="mono">${db.inventory[d.med]} EA${counted ? ' (cycle counted)' : ''}</dd></dl>
+        <label for="rr">Resolution Reason:</label><input id="rr" value="${esc(reason)}">`,
+      hint: 'Please enter the reason for the discrepancy or select a reason from the list. Use Transaction History to investigate and Cycle Count to confirm the bin level.',
+      tabs: oMenu('rd'),
+      left: oSide([['Transaction History', 'data-resolve="hist" data-novalidate'], ['List of Resolve Reasons', 'data-resolve="list" data-novalidate'], ['Previous Screen', 'data-resolve="back" data-novalidate', 'back']]),
+      buttons: [{ label: 'Resolve Discrep', value: 'resolve', primary: true }, { label: 'Cycle Count', value: 'count', novalidate: true }] });
+    reason = r.data.rr || reason;
+    if (r.value === 'back') return go('disc');
+    if (r.value === 'hist') { await info(`Transaction History — ${esc(medLabel(d.med))}`, txTable(db.tx.filter(t => t.med === d.med).sort((a, b) => b.t - a.t).slice(0, 10))); continue; }
+    if (r.value === 'list') {
+      const l = await modal({ title: 'List of Resolve Reasons', body: OMNI_RESOLVE_REASONS.map(x => `<label class="radio"><input type="radio" name="dr" value="${esc(x)}"> <span>${esc(x)}</span></label>`).join(''),
+        buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'OK', value: 'ok', primary: true }], validate: (v, x) => x.dr ? null : 'Select a reason.' });
+      if (l.value === 'ok') reason = l.data.dr;
+      continue;
+    }
+    if (r.value === 'count') {
+      const c = await step({ title: `Cycle Count — ${esc(medLabel(d.med))}`, body: `${drawerView(d.med, { contents: 'items' })}<div class="count-box"><label for="cc">Count every item in the bin.</label><div class="inline"><input id="cc" type="number" inputmode="numeric" min="0"><span>EA</span></div></div>`,
+        hint: 'Cycle count verifies quantity on hand. A witness may be required.', buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'OK', value: 'ok', primary: true }],
+        validate: (v, x) => { const n = parseInt(x.cc, 10); if (isNaN(n)) return 'Enter the count.'; if (n !== db.physical[d.med]) return 'That count does not match what is in the bin. Count again, one item at a time.'; return null; } });
+      if (c.value === 'ok') { db.inventory[d.med] = parseInt(c.data.cc, 10); counted = true; addTx({ type: 'Count', med: d.med, amount: `count ${db.inventory[d.med]}`, note: 'Cycle count during discrepancy resolution' }); }
+      continue;
+    }
+    if (!reason.trim()) { await info('Resolution Reason Required', '<p>Enter the reason for the discrepancy or press <b>List of Resolve Reasons</b>.</p>'); continue; }
+    if (!counted) {
+      const k = await modal({ title: 'Cycle Count Not Done', body: '<p>Perform a cycle count to confirm the correct bin level before resolving. This helps prevent another discrepancy.</p>', buttons: [{ label: 'Resolve Anyway', value: 'go' }, { label: 'Cycle Count', value: 'count', primary: true }] });
+      if (k.value === 'count') continue;
+    }
+    const w = await witnessFlow(`Have your witness enter their User ID and password to resolve the ${esc(medLabel(d.med))} discrepancy.`);
+    if (!w) continue;
+    Object.assign(d, { resolved: true, reason, witness: w, resolvedBy: session.user, resolvedAt: Date.now() });
+    addTx({ type: 'Resolve', med: d.med, amount: `bin ${db.inventory[d.med]}`, witness: w, note: reason });
+    emit('discrepancy_resolved', { med: d.med });
+    toast('Discrepancy resolved.', 'good');
+    return go('disc');
+  }
+}
+
 /* ---------- reports / clipboard ---------- */
 function reportText() {
   const list = db.tx.filter(t => session.reportAll || t.user === session.user).sort((a, b) => a.t - b.t);
@@ -1066,14 +1588,14 @@ const coach = $('#coach');
 function renderCoach() {
   const sc = db.scen, S = sc && scenById(sc.id);
   let html = `<div class="coach-head"><h2>Practice Coach</h2><button class="btn small ghost only-narrow" data-cact="toDevice">Back to cabinet ↑</button></div>
-    <div class="dev-switch" role="radiogroup" aria-label="Cabinet type">${Object.values(DEVICES).map(d => `<button role="radio" aria-checked="${D().key === d.key}" class="${D().key === d.key ? 'on' : ''}" data-cact="device" data-dev="${d.key}"><b>${d.key === 'pyxis' ? 'Pyxis' : 'Omnicell'}</b><span>${d.model}</span></button>`).join('')}</div>
-    ${D().actionFirst ? '<p class="small muted dev-note"><b>Omnicell workflow:</b> choose the action first (Issue, Return or Waste) from the main menu, then select the patient. "Issue" is Omnicell\'s word for removing a medication.</p>' : '<p class="small muted dev-note"><b>Pyxis workflow:</b> select the patient first, then choose Remove, Return, Waste or Override.</p>'}`;
+    <div class="dev-switch" role="radiogroup" aria-label="Cabinet type">${Object.values(DEVICES).map(d => `<button role="radio" aria-checked="${D().key === d.key}" class="${D().key === d.key ? 'on' : ''}" data-cact="device" data-dev="${d.key}"><b>${d.key === 'pyxis' ? 'Pyxis' : 'Omnicell'}</b><span>${d.key === 'omnicell' ? 'Omnicell XT · Color Touch' : 'Pyxis MedStation ES'}</span></button>`).join('')}</div>
+    ${isOmni() ? '<p class="small muted dev-note"><b>Omnicell workflow</b> (Color Touch user guide): log on → patient list → select patient → <b>Remove Meds</b>, <b>Return Meds</b> or <b>Waste Meds</b>. Controlled meds use a <b>countback</b> (quantity remaining after you remove). Overrides come from the <b>Stocked Meds</b> tab. Press <b>Exit</b> to log off.</p>' : '<p class="small muted dev-note"><b>Pyxis workflow:</b> select the patient first, then choose Remove, Return, Waste or Override. Controlled meds use a <b>blind count</b> before you remove.</p>'}`;
   if (S) {
     const stepsHtml = S.steps.map((s, i) => {
       const state = sc.missed.includes(i) ? 'missed' : i < sc.step ? 'done' : i === sc.step && !sc.done ? 'current' : 'todo';
       return `<li class="st ${state}"><span class="st-mark" aria-hidden="true">${state === 'done' ? '✓' : state === 'missed' ? '✕' : i + 1}</span><div><span>${devText(s.text)}</span>${state === 'current' && s.hint ? `<details class="hint"><summary>Hint</summary><p>${devText(s.hint)}</p></details>` : ''}${state === 'missed' ? '<span class="small bad">Missed or out of order</span>' : ''}</div></li>`;
     }).join('');
-    html += `<div class="scen"><div class="scen-top"><span class="lvl">${S.level}</span><h3>${S.title}</h3></div><div class="brief">${devText(S.brief)}</div>
+    html += `<div class="scen"><div class="scen-top"><span class="lvl">${S.level}</span><h3>${devText(S.title)}</h3></div><div class="brief">${devText(S.brief)}</div>
       <ol class="steps">${stepsHtml}</ol>
       ${sc.errors.length ? `<div class="errs"><b>Safety concerns</b><ul>${sc.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : ''}
       ${sc.done ? resultHtml(sc, S) : ''}
@@ -1081,7 +1603,7 @@ function renderCoach() {
   } else {
     html += `<p class="coach-intro">You are in <b>free practice</b>. Explore the ${D().name}, or choose a guided scenario for step-by-step coaching and feedback.</p>`;
   }
-  html += `<details class="coach-sec" ${S && !sc.done ? '' : 'open'}><summary>Guided scenarios</summary><ul class="scen-list">${SCENARIOS.map(s => `<li><button class="scen-btn ${sc && sc.id === s.id ? 'on' : ''}" data-cact="start" data-id="${s.id}"><span class="lvl">${s.level}</span><span>${s.title}</span></button></li>`).join('')}</ul><p class="small muted">Starting a scenario resets patients, inventory and transactions (practice accounts are kept).</p></details>
+  html += `<details class="coach-sec" ${S && !sc.done ? '' : 'open'}><summary>Guided scenarios</summary><ul class="scen-list">${SCENARIOS.map(s => `<li><button class="scen-btn ${sc && sc.id === s.id ? 'on' : ''}" data-cact="start" data-id="${s.id}"><span class="lvl">${s.level}</span><span>${devText(s.title)}</span></button></li>`).join('')}</ul><p class="small muted">Starting a scenario resets patients, inventory and transactions (practice accounts are kept).</p></details>
     <details class="coach-sec"><summary>Practice accounts</summary><ul class="small">
       <li><b>Student:</b> <code>student</code> — first sign-in password <code>123456</code></li>
       <li><b>Witness RNs:</b> <code>kjones</code> / <code>pyxis1</code> · <code>mlee</code> / <code>pyxis2</code> (both have BioID)</li>
@@ -1119,7 +1641,7 @@ coach.addEventListener('click', e => {
   }
 });
 coach.addEventListener('change', e => { if (e.target.dataset.cact === 'challenge') { db.settings.challenge = e.target.checked; save(); toast(e.target.checked ? 'Challenge mode on: calculate waste yourself.' : 'Challenge mode off.'); } });
-function signOutQuiet() { cancelFlows(); session.user = null; session.sel = null; session.cart = []; session.pending = null; go('standby'); }
+function signOutQuiet() { cancelFlows(); session.user = null; session.sel = null; session.cart = []; go('standby'); }
 
 $('#coachJump').addEventListener('click', () => $('#coach').scrollIntoView({ behavior: 'smooth' }));
 

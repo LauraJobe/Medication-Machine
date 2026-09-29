@@ -283,31 +283,89 @@ table.tx { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .tx tr.t-discrepancy .chip { border-color: var(--s-red); color: var(--s-red); }
 
 /* toast */
-#toasts { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 100; width: max-content; max-width: calc(100% - 32px); pointer-events: none; }
-.toast { pointer-events: auto; transform: translateY(20px); opacity: 0; background: #12325a; color: #fff; padding: 11px 18px; border-radius: 8px; box-shadow: 0 8px 20px rgba(0, 0, 0, .3); transition: opacity .25s, transform .25s; font-size: 14.5px; }
+#toasts { position: fixed; left: 50%; top: calc(14px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 100; width: max-content; max-width: calc(100% - 32px); pointer-events: none; }
+.toast { pointer-events: auto; transform: translateY(-20px); opacity: 0; background: #12325a; color: #fff; padding: 11px 18px; border-radius: 8px; box-shadow: 0 8px 20px rgba(0, 0, 0, .3); transition: opacity .25s, transform .25s; font-size: 14.5px; }
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.good { background: #1f6b2a; }
 
-/* Omnicell-style cabinet: slate and teal, rounder controls, action-first main menu */
-.screen.dev-omnicell { --s-navy: #22343c; --s-navy-2: #0e7c7b; --s-blue: #0b7a78; --s-due: #1a73c7; --s-sel: #d3efec; --s-bg: #eff3f3; --s-line: #cfdcdc; }
-.dev-omnicell .topbar { background: linear-gradient(90deg, #1d2d34, #2a4550); border-bottom: 3px solid #13a39b; }
-.dev-omnicell .titlebar h1 { background: #e2eeed; color: #1d2d34; }
-.dev-omnicell .btn { border-radius: 10px; }
-.dev-omnicell .btn.primary:hover:not(:disabled) { background: #075f5d; }
-.dev-omnicell .seg { border-radius: 10px; }
-.dev-omnicell .tile { border-radius: 12px; border-bottom-width: 1px; border-left: 5px solid #0e7c7b; }
-.dev-omnicell .tile.main { background: #0b7a78; border-color: #0b7a78; min-height: 110px; }
-.dev-omnicell .tile.main .t-label { color: #fff; font-size: 20px; }
-.dev-omnicell .tile.main .t-sub { color: #d6f1ef; }
-.dev-omnicell .tile.main:hover { background: #086866; }
-.dev-omnicell .standby-btn { background: radial-gradient(ellipse at 50% 35%, #1f6f73 0%, #1d2d34 60%, #111b20 100%); }
-.dev-omnicell .light { background: #29d3c6; box-shadow: 0 0 0 4px rgba(41, 211, 198, .25), 0 0 14px #29d3c6; }
-.dev-omnicell .cab-drawer.lit, .dev-omnicell .cab-fridge.lit { background: #13a39b; border-color: #0b7a78; box-shadow: 0 0 10px #29d3c6; }
-.dev-omnicell .pocket.open { border-color: #0b7a78; box-shadow: 0 0 12px rgba(41, 211, 198, .8); }
-.dev-omnicell .pocket-zoom { border-color: #0b7a78; }
-.dev-omnicell .modal { border-top-color: #0b7a78; }
-.dev-omnicell .pt-banner { border-left-color: #0b7a78; }
+.sidel:empty, .hintbar:empty, .tabsbar:empty { display: none; }
 .warnline.info { background: #e3f1f7; border-color: #9ccbe0; color: #10364a; }
+
+/* Omnicell Color Touch look (from the 22.5 user guide screens): pale green frame, dark title tab
+   and panel with a white work area, blue side buttons, green OK/go buttons, bottom tabs, black footer. */
+.screen.dev-omnicell {
+  --s-navy: #2f2f2f; --s-navy-2: #4a4a4a; --s-blue: #5a9a26; --s-due: #1a73c7; --s-sel: #b7dc8c; --s-bg: #ffffff; --s-line: #c3c7bd;
+  background: linear-gradient(180deg, #eaf4de 0%, #cfe5b3 45%, #e3efd5 100%);
+  grid-template-columns: 140px minmax(0, 1fr) 140px; grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas: "left title right" "left content right" "left hint right" "left tabs right" "foot foot foot";
+  column-gap: 10px; padding: 10px 10px 0;
+}
+.dev-omnicell .titlebar { grid-area: title; }
+.dev-omnicell .titlebar h1 { background: #3b3b3b; color: #fff; border: 0; border-radius: 8px 8px 0 0; padding: 8px 14px; font-size: 15.5px; max-width: 640px; }
+.dev-omnicell .o-sub { display: block; font-weight: 400; font-size: 13px; opacity: .9; }
+.dev-omnicell .o-allergy { display: block; background: #fff; color: #d0021b; font-weight: 700; margin: 6px -14px -8px; padding: 3px 14px; font-size: 14.5px; }
+.dev-omnicell .content { grid-area: content; background: var(--s-bg); border: 8px solid #3b3b3b; border-bottom: 0; border-radius: 0 8px 0 0; }
+.dev-omnicell .hintbar { grid-area: hint; background: #3b3b3b; color: #fff; font-size: 13px; font-weight: 600; padding: 6px 12px 10px; border-radius: 0 0 6px 6px; }
+.dev-omnicell .tabsbar { grid-area: tabs; display: flex; gap: 3px; flex-wrap: wrap; padding: 6px 0 0; }
+.otab { flex: 1 1 90px; min-height: 50px; padding: 4px 6px; border: 1px solid #98b877; border-top: 0; border-radius: 0 0 8px 8px; background: linear-gradient(#f4faeb, #cde2b2); color: #1d1d1d; font-weight: 700; font-size: 13.5px; line-height: 1.15; cursor: pointer; }
+.otab.on { background: #3b3b3b; color: #fff; border-color: #3b3b3b; }
+.otab:disabled { opacity: .45; cursor: not-allowed; }
+.otab.flash { background: linear-gradient(#e35d5d, #b3261e); color: #fff; opacity: 1; animation: blink 1.2s ease-in-out infinite; }
+.dev-omnicell .sidel { grid-area: left; display: flex; flex-direction: column; gap: 10px; padding-top: 2px; }
+.dev-omnicell .actionbar { grid-area: right; flex-direction: column; justify-content: flex-start; flex-wrap: nowrap; background: transparent; border: 0; padding: 2px 0 0; gap: 10px; }
+.dev-omnicell .btn { width: 100%; min-height: 62px; padding: 6px 8px; border-radius: 4px; border: 1px solid #86add0; background: linear-gradient(#eef7fe, #b9d9f2); color: #151515; font-weight: 700; font-size: 14.5px; line-height: 1.15; white-space: normal; }
+.dev-omnicell .btn:hover:not(:disabled) { background: linear-gradient(#f7fbff, #cde5f7); }
+.dev-omnicell .btn.primary, .dev-omnicell .btn.go { background: linear-gradient(#b5e07f, #6aa531); border-color: #558a25; color: #10240a; }
+.dev-omnicell .btn.primary:hover:not(:disabled), .dev-omnicell .btn.go:hover:not(:disabled) { background: linear-gradient(#c3e893, #78b53a); }
+.dev-omnicell .btn.back { background: linear-gradient(#5d5d5d, #2b2b2b); border-color: #1e1e1e; color: #fff; }
+.dev-omnicell .btn.red { background: linear-gradient(#e46a6a, #b3261e); border-color: #8c1d16; color: #fff; }
+.dev-omnicell .btn.danger { color: #8c1d16; }
+.dev-omnicell .content .btn, .dev-omnicell .modal .btn { width: auto; min-height: 44px; padding: 8px 16px; }
+.dev-omnicell .topbar { grid-area: foot; margin: 10px -10px 0; min-height: 44px; background: linear-gradient(#444, #0e0e0e); color: #fff; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 14px; flex-wrap: nowrap; }
+.of-time { font-family: var(--f-mono); font-size: 13px; }
+.of-brand { font-style: italic; font-weight: 700; color: #b5e07f; letter-spacing: .02em; }
+.of-user { font-weight: 700; font-size: 13.5px; margin-left: auto; }
+.dev-omnicell .topbar .of-exit { width: auto; min-height: 34px; padding: 4px 24px; background: linear-gradient(#6a6a6a, #262626); color: #fff; border-color: #111; }
+.dev-omnicell .topbar .of-exit:disabled { opacity: .5; }
+.dev-omnicell.standby { padding: 0; }
+.dev-omnicell.standby .content { grid-area: auto; grid-column: 1 / -1; grid-row: 1 / -1; border: 0; border-radius: 8px; }
+.screen.standby .sidel, .screen.standby .hintbar, .screen.standby .tabsbar { display: none; }
+.dev-omnicell .standby-btn { background: radial-gradient(ellipse at 50% 35%, #7fb24a 0%, #3d6b1c 50%, #1d3510 100%); }
+.sb-disc { background: #c62828; padding: 6px 14px; border-radius: 6px; font-weight: 700; }
+.dev-omnicell .light { background: #62d321; box-shadow: 0 0 0 4px rgba(98, 211, 33, .3), 0 0 14px #62d321; }
+.dev-omnicell .cab-drawer.lit, .dev-omnicell .cab-fridge.lit { background: #62d321; border-color: #3f8f12; color: #10240a; box-shadow: 0 0 10px #62d321; }
+.dev-omnicell .pocket.open { border-color: #3f8f12; box-shadow: 0 0 12px rgba(98, 211, 33, .8); }
+.dev-omnicell .pocket-zoom { border-color: #3f8f12; }
+.dev-omnicell .take { background: #f1f8e9; border-color: #b9dba0; }
+.dev-omnicell .take-n { background: #5a9a26; }
+.dev-omnicell .modal { border-top-color: #3b3b3b; }
+.dev-omnicell .pt-banner { border-left-color: #5a9a26; }
+.olist { display: grid; gap: 6px; }
+.orow { display: grid; gap: 10px; width: 100%; text-align: left; background: #fff; border: 1px solid #b3b8ac; border-radius: 2px; padding: 8px 10px; font-size: 14px; color: #111; cursor: pointer; }
+.orow.pt { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); }
+.orow.pt:hover, .orow.med1:hover { background: #d7ecbf; }
+.orow.med1 { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.orow.med1.dim { background: #a8a8a8; }
+.orow.med { grid-template-columns: 52px minmax(0, 1fr); gap: 6px; padding: 0; border: 0; background: transparent; cursor: default; }
+.oqty { border: 1px solid #b3b8ac; background: linear-gradient(#f4faeb, #d9ebc3); font-family: var(--f-mono); font-weight: 700; font-size: 15px; cursor: pointer; }
+.oqty:empty { cursor: default; }
+.omain { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; text-align: left; background: #fff; border: 1px solid #b3b8ac; padding: 8px 10px; cursor: pointer; color: #111; font-size: 14px; }
+.orow.med.sel .omain { background: #8dc63f; border-color: #6aa531; }
+.orow.med.dim .omain { background: #a8a8a8; }
+.oright { text-align: right; font-size: 13px; }
+.o-red { color: #c62828; font-weight: 700; }
+.orow.med.sel .o-red { color: #7a0000; }
+.o-center { display: grid; place-items: center; min-height: 200px; font-size: 18px; font-weight: 700; }
+.o-search { margin-bottom: 8px; }
+.o-logon { text-align: center; }
+.o-brand { font-size: 28px; font-weight: 800; font-style: italic; color: #5a9a26; margin: 6px 0; }
+.o-welcome { font-weight: 700; font-size: 18px; }
+.o-logon-grid { display: flex; gap: 24px; justify-content: center; align-items: center; flex-wrap: wrap; text-align: left; }
+.o-logon-grid > div:first-child { min-width: 0; flex: 1 1 220px; max-width: 360px; }
+.screen .o-logon input.hl { background: #fff59d; border-color: #c9a800; }
+.o-facts { grid-template-columns: max-content minmax(0, 1fr); }
+.o-facts dt { text-align: right; font-weight: 700; color: #333; }
+.o-item { font-size: 16px; color: #111; border-bottom: 2px solid #999; padding-bottom: 6px; margin: 0 0 10px; text-transform: none; letter-spacing: 0; }
 
 /* ---------- practice coach (theme-aware page chrome) ---------- */
 .coach { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 16px; position: sticky; top: 16px; max-height: calc(100dvh - 32px); overflow: auto; min-width: 0; }
@@ -399,6 +457,17 @@ table.tx { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .modal { padding: 14px; }
   .modal-btns .btn { flex: 1 1 auto; }
   .disclaimer { margin-inline: 8px; }
+}
+@media (max-width: 720px) {
+  .screen.dev-omnicell { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "title" "left" "content" "hint" "tabs" "right" "foot"; padding: 6px 6px 0; }
+  .dev-omnicell .sidel, .dev-omnicell .actionbar { flex-direction: row; flex-wrap: wrap; gap: 6px; padding: 6px 0; }
+  .dev-omnicell .sidel .btn, .dev-omnicell .actionbar .btn { flex: 1 1 30%; min-height: 44px; }
+  .dev-omnicell .content { border-width: 5px; }
+  .dev-omnicell .topbar { margin: 6px -6px 0; }
+  .of-brand { display: none; }
+  .orow.pt { grid-template-columns: minmax(0, 1fr) auto; }
+  .orow.pt .o-mid { display: none; }
+  .otab { flex-basis: 45%; min-height: 42px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

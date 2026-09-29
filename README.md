@@ -2,21 +2,23 @@
 
 A browser-based practice version of an automated medication dispensing cabinet, built so nursing students can rehearse **Pyxis-style** and **Omnicell-style** workflows before clinical. It runs on laptops, tablets and phones and needs no install, accounts or server.
 
-> Educational simulator. Workflows are modeled on published BD Pyxis™ MedStation™ ES job aids, a Pyxis MedStation 3000 training manual, and common Omnicell® XT cabinet workflows. This project is not affiliated with or endorsed by BD or Omnicell. All patients, orders and users are fictional. Do not enter real patient information.
+> Educational simulator. Workflows are modeled on published BD Pyxis™ MedStation™ ES job aids, a Pyxis MedStation 3000 training manual, and the Omnicell Color Touch 22.5 user guide. This project is not affiliated with or endorsed by BD or Omnicell. All patients, orders and users are fictional. Do not enter real patient information.
 
 ## Two cabinet types
 
-Switch at the top of the **Practice Coach**. Patients, inventory and scenarios are shared, so students can practice the same task on both.
+Switch at the top of the **Practice Coach**. Patients, medications and all 10 scenarios are shared, so students can practice the same task on both cabinets.
 
-| | Pyxis mode | Omnicell mode |
+| | Pyxis mode | Omnicell mode (Color Touch 22.5 user guide) |
 | --- | --- | --- |
-| Workflow order | Patient first, then Remove / Return / Waste / Override | Action first (Issue / Return / Waste from the main menu), then patient |
-| Taking a medication out | **Remove** | **Issue** |
-| Order tabs | Due Now · PRN · All Orders | Scheduled · PRN · All Orders |
-| Waste left for later | Undocumented Waste | Pending Waste |
-| Drawer terms | MiniDrawer, Matrix, CUBIE, pocket light | SinglePointe drawer, open matrix, lidded bin, Guiding Light |
-
-The Omnicell mode follows general Omnicell XT conventions. Facility builds differ, so share your facility's Omnicell job aids to tune the wording.
+| Log on | Touch screen → User ID → password or BioID | "Welcome! Please Enter:" User ID + password, or fingerprint (hold 2 s). **Short List**: after your first log-on of the shift, a fingerprint alone logs you on. Strong passwords (6–18 characters, 3 of 4 character types). |
+| Home | Tiles: My Patients, All Available Patients, … | Patient list opens directly: **Global / Local / Partial Dose / My Patients** tabs. Main Menu: Patient Care, Reports, Resolve Discrep, User Menus |
+| Taking meds out | Select patient → **Remove** → Due Now / PRN / All Orders | Select patient → **Remove Meds** → Scheduled Meds / PRN Only / Active / Inactive Med Orders / Stocked Meds → **Remove Now** |
+| Controlled count | **Blind count** before removing | **Countback**: quantity remaining *after* removing |
+| Override | Override button → override list → reason at Remove Meds | **Stocked Meds** tab → "Do you wish to override?" → reason (Emergency Situation, MD Order, Patient Condition, Pharmacy Not Available) |
+| Waste | Waste Now / Waste Later → Undocumented Waste | **Waste Partial Dose** during the issue, or **Close Bin** → Partial Dose List → Waste Meds (Outstanding Issued Amount, Administration Amount, Waste Amount, Waste Reason) |
+| Return | Return → return bin | **Return Meds** → Meds Eligible to Return (your open PMAs) → Administration Amount + Quantity to Return → Return Now |
+| Discrepancy | Discrepancies tile → investigate, recount, reason, witness | **Resolve Discrep** → Transaction History, Cycle Count, List of Resolve Reasons → witness |
+| Log off | Sign Out | **Exit** |
 
 ## What students can practice
 

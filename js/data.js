@@ -232,8 +232,8 @@ const SCENARIOS = [
     ] },
 ];
 
-/* Cabinet profiles. Pyxis is patient-first (pick the patient, then Remove/Return/Waste).
- * Omnicell is action-first (pick Issue/Return/Waste, then the patient) and uses its own terms. */
+/* Cabinet profiles. Both are patient-first. The Omnicell profile follows the Omnicell
+ * Color Touch 22.5 user guide (Remove Meds / Return Meds / Waste Meds, countback, PMAs). */
 const DEVICES = {
   pyxis: {
     key: 'pyxis', name: 'MedStation', model: 'Pyxis-style MedStation ES', station: '4W-MAIN', actionFirst: false,
@@ -243,10 +243,15 @@ const DEVICES = {
     openMsg: 'The drawer is open and the pocket light is on.',
   },
   omnicell: {
-    key: 'omnicell', name: 'Omnicell XT', model: 'Omnicell-style XT cabinet', station: '4W-OMNI', actionFirst: true,
-    L: { remove: 'Issue', removeMed: 'Issue', removeMeds: 'Issue Meds', removing: 'Issue Medications', selected: 'Med Selection', allPts: 'All Patients',
-         undoc: 'Pending Waste', due: 'Scheduled', find: 'Find Med', prefs: 'User Settings', past: 'Issue History', profile: 'Med Profile', removed: 'issued' },
-    types: { MiniDrawer: 'SinglePointe drawer', Matrix: 'Open matrix drawer', CUBIE: 'Lidded bin drawer', Fridge: 'Refrigerator' }, pocket: 'Bin',
-    openMsg: 'The drawer is open. Follow the Guiding Light to the lit bin.',
+    key: 'omnicell', name: 'Omnicell XT', model: 'Omnicell-style XT (Color Touch)', station: '4W-OMNI1', actionFirst: false,
+    L: { remove: 'Remove Meds', removeMed: 'Remove Now', removeMeds: 'Remove Now', removing: 'Remove Meds', selected: 'Display Meds to Remove', allPts: 'Local List',
+         undoc: 'Partial Dose List', due: 'Scheduled Meds', find: 'Find Item', prefs: 'User Menus', past: 'Transaction History', profile: 'Active Med Orders', removed: 'issued' },
+    types: { MiniDrawer: 'FlexBin single-dose drawer', Matrix: 'Matrix drawer', CUBIE: 'Locking bin drawer', Fridge: 'FlexLock refrigerator' }, pocket: 'Bin',
+    openMsg: 'Follow the guiding lights: open the drawer with the blinking green LED, then the lit bin.',
   },
 };
+
+// Omnicell Color Touch lists (from the 22.5 user guide screens)
+const OMNI_OVERRIDE_REASONS = ['Emergency Situation', 'MD Order', 'Patient Condition', 'Pharmacy Not Available'];
+const OMNI_WASTE_REASONS = ['Partial dose — remainder of package', 'Patient refused after preparation', 'Dropped / contaminated', 'Order changed or discontinued'];
+const OMNI_RESOLVE_REASONS = ['Miscount at countback (my error)', 'Previous user miscount — bin level corrected by cycle count', 'Removed more or less than indicated on screen (verified on MAR)', 'Item found in wrong bin or return bin', 'Unable to resolve — incident report filed, charge nurse notified'];
