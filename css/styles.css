@@ -288,6 +288,27 @@ table.tx { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.good { background: #1f6b2a; }
 
+/* Omnicell-style cabinet: slate and teal, rounder controls, action-first main menu */
+.screen.dev-omnicell { --s-navy: #22343c; --s-navy-2: #0e7c7b; --s-blue: #0b7a78; --s-due: #1a73c7; --s-sel: #d3efec; --s-bg: #eff3f3; --s-line: #cfdcdc; }
+.dev-omnicell .topbar { background: linear-gradient(90deg, #1d2d34, #2a4550); border-bottom: 3px solid #13a39b; }
+.dev-omnicell .titlebar h1 { background: #e2eeed; color: #1d2d34; }
+.dev-omnicell .btn { border-radius: 10px; }
+.dev-omnicell .btn.primary:hover:not(:disabled) { background: #075f5d; }
+.dev-omnicell .seg { border-radius: 10px; }
+.dev-omnicell .tile { border-radius: 12px; border-bottom-width: 1px; border-left: 5px solid #0e7c7b; }
+.dev-omnicell .tile.main { background: #0b7a78; border-color: #0b7a78; min-height: 110px; }
+.dev-omnicell .tile.main .t-label { color: #fff; font-size: 20px; }
+.dev-omnicell .tile.main .t-sub { color: #d6f1ef; }
+.dev-omnicell .tile.main:hover { background: #086866; }
+.dev-omnicell .standby-btn { background: radial-gradient(ellipse at 50% 35%, #1f6f73 0%, #1d2d34 60%, #111b20 100%); }
+.dev-omnicell .light { background: #29d3c6; box-shadow: 0 0 0 4px rgba(41, 211, 198, .25), 0 0 14px #29d3c6; }
+.dev-omnicell .cab-drawer.lit, .dev-omnicell .cab-fridge.lit { background: #13a39b; border-color: #0b7a78; box-shadow: 0 0 10px #29d3c6; }
+.dev-omnicell .pocket.open { border-color: #0b7a78; box-shadow: 0 0 12px rgba(41, 211, 198, .8); }
+.dev-omnicell .pocket-zoom { border-color: #0b7a78; }
+.dev-omnicell .modal { border-top-color: #0b7a78; }
+.dev-omnicell .pt-banner { border-left-color: #0b7a78; }
+.warnline.info { background: #e3f1f7; border-color: #9ccbe0; color: #10364a; }
+
 /* ---------- practice coach (theme-aware page chrome) ---------- */
 .coach { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 16px; position: sticky; top: 16px; max-height: calc(100dvh - 32px); overflow: auto; min-width: 0; }
 .coach code { color: var(--ink); }
@@ -301,6 +322,11 @@ table.tx { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .coach .btn:hover { background: rgba(127, 140, 155, .12); }
 .coach .btn.danger { color: var(--bad); border-color: var(--bad); }
 .only-narrow { display: none; }
+.dev-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 12px 0 6px; }
+.dev-switch button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; min-width: 0; }
+.dev-switch button span { font-size: 12px; color: var(--muted); }
+.dev-switch button.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.dev-note { margin: 4px 0 8px; }
 .scen { margin: 12px 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .scen-top { display: flex; flex-direction: column; gap: 4px; }
 .lvl { font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }

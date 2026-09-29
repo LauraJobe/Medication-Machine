@@ -231,3 +231,22 @@ const SCENARIOS = [
       { text: 'Sign out', match: e => e.type === 'signout' },
     ] },
 ];
+
+/* Cabinet profiles. Pyxis is patient-first (pick the patient, then Remove/Return/Waste).
+ * Omnicell is action-first (pick Issue/Return/Waste, then the patient) and uses its own terms. */
+const DEVICES = {
+  pyxis: {
+    key: 'pyxis', name: 'MedStation', model: 'Pyxis-style MedStation ES', station: '4W-MAIN', actionFirst: false,
+    L: { remove: 'Remove', removeMed: 'Remove Med', removeMeds: 'Remove Meds', removing: 'Remove Medications', selected: 'Selected Meds', allPts: 'All Available Patients',
+         undoc: 'Undocumented Waste', due: 'Due Now', find: 'Global Find', prefs: 'User Preferences', past: 'Past Removed', profile: 'Patient Profile', removed: 'removed' },
+    types: { MiniDrawer: 'MiniDrawer', Matrix: 'Matrix', CUBIE: 'CUBIE', Fridge: 'Refrigerator' }, pocket: 'Pocket',
+    openMsg: 'The drawer is open and the pocket light is on.',
+  },
+  omnicell: {
+    key: 'omnicell', name: 'Omnicell XT', model: 'Omnicell-style XT cabinet', station: '4W-OMNI', actionFirst: true,
+    L: { remove: 'Issue', removeMed: 'Issue', removeMeds: 'Issue Meds', removing: 'Issue Medications', selected: 'Med Selection', allPts: 'All Patients',
+         undoc: 'Pending Waste', due: 'Scheduled', find: 'Find Med', prefs: 'User Settings', past: 'Issue History', profile: 'Med Profile', removed: 'issued' },
+    types: { MiniDrawer: 'SinglePointe drawer', Matrix: 'Open matrix drawer', CUBIE: 'Lidded bin drawer', Fridge: 'Refrigerator' }, pocket: 'Bin',
+    openMsg: 'The drawer is open. Follow the Guiding Light to the lit bin.',
+  },
+};

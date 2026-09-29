@@ -33,6 +33,11 @@ const sig = o => `${doseText(o)} ${F[o.med].unit} ${F[o.med].route} ${o.freq}${o
 const freqHours = f => { const m = /^q(\d+)h/.exec(f); return m ? +m[1] : null; };
 const userName = id => { const u = db.users[id]; return u ? `${u.last}, ${u.first} ${u.title || ''}`.trim() : id; };
 const scenById = id => SCENARIOS.find(s => s.id === id);
+const D = () => DEVICES[(db && db.settings.device) || 'pyxis'] || DEVICES.pyxis;
+const T = k => D().L[k];
+const OMNI_TEXT = [[/<b>Remove<\/b>/g, '<b>Issue</b>'], [/→ Remove/g, '→ Issue'], [/Remove Med\b/g, 'Issue'], [/Undocumented Waste/g, 'Pending Waste'],
+  [/All Available Patients/g, 'All Patients'], [/MiniDrawer pocket/g, 'SinglePointe bin'], [/MiniDrawer/g, 'SinglePointe drawer'], [/MedStation/g, 'Omnicell']];
+const devText = h => D().key === 'omnicell' ? OMNI_TEXT.reduce((t, [a, b]) => t.replace(a, b), h) : h;
 
 /* ---------- persistent state ---------- */
 let db;
@@ -51,6 +56,7 @@ function load() {
 function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); } catch {} }
 db = load();
 // Keep the simulated shift current if the student comes back another day.
+if (!db.settings.device) db.settings.device = 'pyxis';
 if (Date.now() - db.base > 10 * HOUR) { db.base = Date.now(); db.orders = {}; }
 
 const session = { user: null, screen: 'standby', listTab: 'my', sel: null, mode: 'remove', tab: 'due', cart: [], reportAll: false };
@@ -124,7 +130,7 @@ function modal({ title, body, buttons, validate, cls = '' }) {
   return waitIn(overlay, validate).then(r => { overlay.hidden = true; overlay.innerHTML = ''; return r; });
 }
 function step({ title, body, buttons, validate, after }) {
-  screenEl.className = 'screen';
+  screenEl.className = 'screen dev-' + D().key;
   titlebar.innerHTML = titleHtml(title);
   content.innerHTML = body + '<div class="err" role="alert" hidden></div>';
   content.scrollTop = 0;
@@ -244,11 +250,11 @@ function renderTopbar() {
   const u = session.user;
   const undoc = u ? undocFor(u).length : 0;
   const disc = db.discrepancies.filter(d => !d.resolved).length;
-  return `<div class="tb-device"><b>4W-MAIN</b><span>4 West Medical-Surgical</span></div>
+  return `<div class="tb-device"><b>${D().station}</b><span>${D().name} · 4 West Med-Surg</span></div>
     <div class="tb-clock"><span class="clock">${hhmm(now)}</span><span class="tb-date">${dateStr(now)}</span></div>
     <div class="tb-user">
       ${disc ? `<button class="ind ind-disc" data-act="go" data-to="disc" title="Unresolved discrepancy" aria-label="Unresolved discrepancies: ${disc}">Δ ${disc}</button>` : ''}
-      ${undoc ? `<button class="ind ind-waste" data-act="go" data-to="undoc" title="You have undocumented waste" aria-label="Undocumented waste: ${undoc}">W ${undoc}</button>` : ''}
+      ${undoc ? `<button class="ind ind-waste" data-act="go" data-to="undoc" title="${T('undoc')}" aria-label="${T('undoc')}: ${undoc}">W ${undoc}</button>` : ''}
       ${u ? `<span class="tb-name">${esc(userName(u))}</span><button class="btn small ghost" data-act="home">Home</button><button class="btn small signout" data-act="signout">Sign Out</button>` : ''}
     </div>`;
 }
@@ -258,7 +264,7 @@ function go(screen, extra = {}) { Object.assign(session, extra); session.screen 
 function render() {
   cancelFlows();
   const out = (SCREENS[session.screen] || SCREENS.standby)();
-  screenEl.className = 'screen ' + (out.cls || '');
+  screenEl.className = `screen dev-${D().key} ` + (out.cls || '');
   topbar.innerHTML = renderTopbar();
   titlebar.innerHTML = titleHtml(out.title);
   content.innerHTML = out.body;
@@ -304,7 +310,7 @@ const POCKETS = {
 };
 function locText(id) {
   const L = F[id].loc;
-  return L.type === 'Fridge' ? `Refrigerator · Secure Bin ${L.pocket}` : `Main · Drawer ${L.drawer} · ${L.type} · Pocket ${L.pocket}`;
+  return L.type === 'Fridge' ? `Refrigerator · ${D().key === 'omnicell' ? 'Locking' : 'Secure'} Bin ${L.pocket}` : `Main · Drawer ${L.drawer} · ${D().types[L.type]} · ${D().pocket} ${L.pocket}`;
 }
 function unitIcon(id) {
   const f = F[id].form;
@@ -323,8 +329,8 @@ function drawerView(id, { contents = 'label', note = '' } = {}) {
   if (contents === 'items') inner = `<div class="pocket-zoom" role="img" aria-label="Open pocket containing ${n} ${unitWord(id, n)}">${n ? Array.from({ length: Math.min(n, 60) }, () => unitIcon(id)).join('') : '<span class="muted">Empty</span>'}</div>`;
   else inner = `<div class="pocket-zoom label"><b>${esc(medLabel(id))}</b><span>${esc(medDesc(id))}</span></div>`;
   return `<div class="drawer-view">
-      <div class="dv-loc"><span class="light"></span><div><b>${locText(id)}</b><span class="muted">${L.type === 'Fridge' ? 'The secure bin light is on.' : 'The drawer is open and the pocket light is on.'}</span></div></div>
-      <div class="dv-art">${cab}<div class="dv-drawer"><div class="dv-drawer-label">${L.type === 'Fridge' ? 'Refrigerator bins' : 'Drawer ' + L.drawer + ' · ' + L.type}</div>${grid}</div><div class="dv-pocket"><div class="dv-drawer-label">Pocket ${L.pocket}</div>${inner}</div></div>
+      <div class="dv-loc"><span class="light"></span><div><b>${locText(id)}</b><span class="muted">${L.type === 'Fridge' ? 'The refrigerator bin light is on.' : D().openMsg}</span></div></div>
+      <div class="dv-art">${cab}<div class="dv-drawer"><div class="dv-drawer-label">${L.type === 'Fridge' ? 'Refrigerator bins' : 'Drawer ' + L.drawer + ' · ' + D().types[L.type]}</div>${grid}</div><div class="dv-pocket"><div class="dv-drawer-label">${D().pocket} ${L.pocket}</div>${inner}</div></div>
       ${note}
     </div>`;
 }
@@ -333,8 +339,8 @@ function drawerView(id, { contents = 'label', note = '' } = {}) {
 const SCREENS = {
   standby() {
     return { cls: 'standby', body: `<button class="standby-btn" data-act="signin">
-        <span class="sb-kicker">4W-MAIN · 4 West Medical-Surgical</span>
-        <span class="sb-title">MedStation</span>
+        <span class="sb-kicker">${D().station} · 4 West Medical-Surgical</span>
+        <span class="sb-title">${D().name}</span>
         <span class="sb-sub">Touch the screen to sign in</span>
         <span class="sb-time mono">${hhmm(Date.now())}</span>
       </button>` };
@@ -347,16 +353,17 @@ const SCREENS = {
     const disc = db.discrepancies.filter(d => !d.resolved).length;
     const tile = (act, to, label, sub, extra = '', badge = '') => `<button class="tile ${extra}" data-act="${act}" data-to="${to}"><span class="t-label">${label}</span><span class="t-sub">${sub}</span>${badge}</button>`;
     return { title: 'Home', body: `
-      ${undoc ? `<button class="banner blue" data-act="go" data-to="undoc"><b>You have undocumented waste.</b> Select to document it now (${undoc}).</button>` : ''}
+      ${undoc ? `<button class="banner blue" data-act="go" data-to="undoc"><b>You have ${T('undoc').toLowerCase()}.</b> Select to document it now (${undoc}).</button>` : ''}
       ${disc ? `<button class="banner red" data-act="go" data-to="disc"><b>Unresolved discrepancy on this device.</b> Resolve before the end of your shift.</button>` : ''}
       <div class="tiles">
+        ${D().actionFirst ? `${tile('act1', 'remove', T('remove'), 'Select the patient, then medications', 'main')}${tile('act1', 'return', 'Return', 'Unopened medications', 'main')}${tile('act1', 'waste', 'Waste', 'Controlled-substance waste', 'main')}` : ''}
         ${tile('list', 'my', 'My Patients', my ? `${my} patient${my > 1 ? 's' : ''} on your list` : 'Build your assignment list')}
-        ${tile('list', 'all', 'All Available Patients', `${PATIENTS.length} patients on 4 West`)}
-        ${tile('go', 'undoc', 'Undocumented Waste', undoc ? `${undoc} to document` : 'Nothing pending', undoc ? 'warn' : '', undoc ? `<span class="badge">${undoc}</span>` : '')}
+        ${tile('list', 'all', T('allPts'), `${PATIENTS.length} patients on 4 West`)}
+        ${tile('go', 'undoc', T('undoc'), undoc ? `${undoc} to document` : 'Nothing pending', undoc ? 'warn' : '', undoc ? `<span class="badge">${undoc}</span>` : '')}
         ${tile('go', 'disc', 'Discrepancies', disc ? `${disc} unresolved` : 'None open', disc ? 'danger' : '', disc ? `<span class="badge red">${disc}</span>` : '')}
-        ${tile('go', 'find', 'Global Find', 'Locate any medication')}
+        ${tile('go', 'find', T('find'), 'Locate any medication')}
         ${tile('go', 'reports', 'Reports', 'Activity by user or patient')}
-        ${tile('go', 'prefs', 'User Preferences', 'Password & BioID')}
+        ${tile('go', 'prefs', T('prefs'), 'Password & BioID')}
       </div>` };
   },
 
@@ -370,7 +377,7 @@ const SCREENS = {
       const c = patientCounts(p);
       const undoc = db.removals.some(r => r.undocumented && r.patient === p.id);
       return `<div class="prow ${sel === p.id ? 'sel' : ''} ${c.past ? 'pastdue' : ''}" data-filterable="${esc(p.last + ' ' + p.first + ' ' + p.room + ' ' + p.mrn)}">
-        <button class="prow-main" data-act="selPatient" data-id="${p.id}" aria-pressed="${sel === p.id}">
+        <button class="prow-main" data-act="${session.pending ? 'pickPt' : 'selPatient'}" data-id="${p.id}" aria-pressed="${sel === p.id}">
           <span class="pr-name"><span class="pr-title"><b>${esc(patName(p))}</b>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}${p.allergies.length ? ' <span class="chip allergy">ALLERGY</span>' : ''}${undoc ? ' <span class="chip waste">UNDOC WASTE</span>' : ''}</span>
             <span class="muted small"><span class="rm-inline">Rm <span class="mono">${p.room}</span> · </span>MRN <span class="mono">${p.mrn}</span> · DOB <span class="mono">${fmtDob(p.dob)}</span></span></span>
           <span class="pr-room mono">${p.room}</span>
@@ -381,14 +388,16 @@ const SCREENS = {
       </div>`;
     }).join('');
     const dis = sel ? '' : ' disabled';
-    return { title: my ? 'My Patients' : 'All Available Patients', body: `
-      <div class="seg" role="tablist"><button class="${my ? 'on' : ''}" data-act="list" data-to="my" role="tab" aria-selected="${my}">My Patients</button><button class="${!my ? 'on' : ''}" data-act="list" data-to="all" role="tab" aria-selected="${!my}">All Available Patients</button></div>
+    const pendName = { remove: T('remove'), return: 'Return', waste: 'Waste' }[session.pending];
+    return { title: pendName ? `${pendName} — Select Patient` : my ? 'My Patients' : T('allPts'), body: `
+      ${pendName ? `<p class="warnline info">Select the patient for this <b>${pendName}</b>. Verify two identifiers.</p>` : ''}
+      <div class="seg" role="tablist"><button class="${my ? 'on' : ''}" data-act="list" data-to="my" role="tab" aria-selected="${my}">My Patients</button><button class="${!my ? 'on' : ''}" data-act="list" data-to="all" role="tab" aria-selected="${!my}">${T('allPts')}</button></div>
       <div class="list-tools"><input id="ptsearch" type="search" placeholder="Search last name, room or MRN" data-filter aria-label="Search patients">
         ${my ? '<button class="btn" data-act="go" data-to="editMy">Edit Patient List</button>' : ''}</div>
-      ${list.length ? `<div class="ptable"><div class="phead"><span>Patient</span><span>Room</span><span class="pr-col">Due Now</span><span class="pr-col">PRN</span><span class="pr-col">All Orders</span></div>${rows}</div>
+      ${list.length ? `<div class="ptable"><div class="phead"><span>Patient</span><span>Room</span><span class="pr-col">${T('due')}</span><span class="pr-col">PRN</span><span class="pr-col">All Orders</span></div>${rows}</div>
         <p class="legend"><span class="dot mini"></span> due now · <span class="dot mini past"></span> past due (orange bar) · tap a dot to open that tab</p>`
       : `<div class="empty"><b>Your My Patients list is empty.</b><p>Select <b>Edit Patient List</b> and add the patients you are assigned to today.</p><button class="btn primary" data-act="go" data-to="editMy">Edit Patient List</button></div>`}`,
-      footer: `<button class="btn" data-act="pa" data-a="remove"${dis}>Remove</button><button class="btn" data-act="pa" data-a="return"${dis}>Return</button><button class="btn" data-act="pa" data-a="waste"${dis}>Waste</button><button class="btn override" data-act="pa" data-a="override"${dis}>Override</button><button class="btn" data-act="pa" data-a="past"${dis}>Past Removed</button>` };
+      footer: pendName ? `<button class="btn" data-act="home">Main Menu</button>` : `<button class="btn" data-act="pa" data-a="remove"${dis}>${T('remove')}</button><button class="btn" data-act="pa" data-a="return"${dis}>Return</button><button class="btn" data-act="pa" data-a="waste"${dis}>Waste</button><button class="btn override" data-act="pa" data-a="override"${dis}>Override</button><button class="btn" data-act="pa" data-a="past"${dis}>${T('past')}</button>` };
   },
 
   editMy() {
@@ -397,7 +406,7 @@ const SCREENS = {
     const mine = session.editList;
     return { title: 'Edit My Patients', body: `<p class="muted">Tap a patient on the left to add them to your list. Tap × to remove.</p>
       <div class="two-col">
-        <div><h3>All Available Patients</h3>${PATIENTS.map(p => `<button class="pick ${mine.includes(p.id) ? 'added' : ''}" data-act="addMy" data-id="${p.id}"${mine.includes(p.id) ? ' disabled' : ''}><b>${esc(patName(p))}</b> <span class="mono muted">${p.room}</span>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}</button>`).join('')}</div>
+        <div><h3>${T('allPts')}</h3>${PATIENTS.map(p => `<button class="pick ${mine.includes(p.id) ? 'added' : ''}" data-act="addMy" data-id="${p.id}"${mine.includes(p.id) ? ' disabled' : ''}><b>${esc(patName(p))}</b> <span class="mono muted">${p.room}</span>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}</button>`).join('')}</div>
         <div><h3>My Patients (${mine.length})</h3>${mine.length ? mine.map(id => { const p = PAT(id); return `<div class="pick in"><span><b>${esc(patName(p))}</b> <span class="mono muted">${p.room}</span></span><button class="x" data-act="delMy" data-id="${id}" aria-label="Remove ${esc(patName(p))}">×</button></div>`; }).join('') : '<p class="muted">No patients yet.</p>'}</div>
       </div>`,
       footer: `<button class="btn" data-act="cancelMy">Cancel</button><button class="btn primary" data-act="saveMy">Accept</button>` };
@@ -435,17 +444,17 @@ const SCREENS = {
     const cartHtml = cart.length ? cart.map((c, i) => `<div class="cart-item ${c.override ? 'ov' : ''}"><div><b>${esc(medLabel(c.med))}</b><span class="muted">${esc(medDesc(c.med))}</span>
         <span>Dose <b>${num(c.dose)} ${F[c.med].unit}</b> · Remove <b>${c.qty} ${unitWord(c.med, c.qty)}</b>${c.override ? ' · <span class="ovtxt">Override</span>' : ''}</span></div>
         <button class="x" data-act="unpick" data-i="${i}" aria-label="Remove ${esc(medLabel(c.med))} from selected meds">×</button></div>`).join('') : '<p class="muted">Select medications on the left. They will appear here.</p>';
-    return { title: ov ? 'Override — remove without pharmacist review' : 'Remove Medications', cls: ov ? 'mode-override' : '', body: `${patientBanner(p)}
+    return { title: ov ? `Override — ${T('remove').toLowerCase()} without pharmacist review` : T('removing'), cls: ov ? 'mode-override' : '', body: `${patientBanner(p)}
       ${ov ? '<p class="warnline">Override bypasses pharmacist order review. Use it only for emergencies or when the order cannot be verified in time. Striped items are override medications.</p>' : ''}
       <div class="profile">
         <section class="plist">
-          ${!ov ? `<div class="seg small" role="tablist">${[['due', 'Due Now'], ['prn', 'PRN'], ['all', 'All Orders']].map(([k, l]) => `<button class="${session.tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}" role="tab" aria-selected="${session.tab === k}">${l}</button>`).join('')}</div>` : ''}
+          ${!ov ? `<div class="seg small" role="tablist">${[['due', T('due')], ['prn', 'PRN'], ['all', 'All Orders']].map(([k, l]) => `<button class="${session.tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}" role="tab" aria-selected="${session.tab === k}">${l}</button>`).join('')}</div>` : ''}
           <input type="search" id="medsearch" placeholder="Type the first 3 letters of the medication" data-filter aria-label="Search medications">
           <div class="mlist">${listHtml}</div>
         </section>
-        <aside class="cart"><h3>Selected Meds <span class="muted">(${cart.length})</span></h3>${cartHtml}</aside>
+        <aside class="cart"><h3>${T('selected')} <span class="muted">(${cart.length})</span></h3>${cartHtml}</aside>
       </div>`,
-      footer: `<button class="btn" data-act="backList">Back</button>${ov ? '<button class="btn" data-act="mode" data-m="remove">Patient Profile</button>' : '<button class="btn override" data-act="mode" data-m="override">Override</button>'}<button class="btn primary" data-act="removeMeds"${cart.length ? '' : ' disabled'}>Remove Med</button>` };
+      footer: `<button class="btn" data-act="backList">Back</button>${ov ? `<button class="btn" data-act="mode" data-m="remove">${T('profile')}</button>` : '<button class="btn override" data-act="mode" data-m="override">Override</button>'}<button class="btn primary" data-act="removeMeds"${cart.length ? '' : ' disabled'}>${T('removeMed')}</button>` };
   },
 
   returns() {
@@ -479,12 +488,12 @@ const SCREENS = {
   past() {
     const p = PAT(session.sel);
     const list = db.tx.filter(t => t.patient === p.id).sort((a, b) => b.t - a.t);
-    return { title: 'Past Removed', body: `${patientBanner(p)}${txTable(list)}`, footer: `<button class="btn" data-act="backList">Back</button>` };
+    return { title: T('past'), body: `${patientBanner(p)}${txTable(list)}`, footer: `<button class="btn" data-act="backList">Back</button>` };
   },
 
   undoc() {
     const list = undocFor(session.user);
-    return { title: 'Undocumented Waste', body: `<p class="muted">These controlled-substance removals left an unused portion that you have not documented. Select one and waste it with a witness.</p>
+    return { title: T('undoc'), body: `<p class="muted">These controlled-substance removals left an unused portion that you have not documented. Select one and waste it with a witness.</p>
       <div class="mlist">${list.map(r => { const p = PAT(r.patient); const left = r.expectedWaste - r.wasted; return `<button class="mrow" data-act="doWaste" data-id="${r.id}">
         <span class="m-name"><b>${esc(patName(p))}</b> <span class="mono muted">${p.room}</span><span class="m-sig">${esc(medLabel(r.med))} ${esc(medDesc(r.med))} · removed ${hhmm(r.t)} · dose ${num(r.dose)} ${F[r.med].unit}</span></span>
         <span class="m-when"><span class="chip waste">${db.settings.challenge ? 'WASTE DUE' : amtText(r.med, left)}</span></span></button>`; }).join('') || '<p class="empty-line">No undocumented waste. Nice work.</p>'}</div>`,
@@ -503,8 +512,8 @@ const SCREENS = {
 
   find() {
     const ids = Object.keys(F).sort((a, b) => F[a].name.localeCompare(F[b].name));
-    return { title: 'Global Find', body: `<input type="search" id="gfsearch" placeholder="Search medication (generic or brand)" data-filter aria-label="Search medications">
-      <div class="mlist">${ids.map(id => { const m = F[id]; return `<div class="mrow static" data-filterable="${esc(m.name + ' ' + m.brand)}"><span class="m-name"><b>${esc(medLabel(id))}</b> <span class="muted">${esc(medDesc(id))}</span><span class="m-sig">4W-MAIN · ${locText(id)}</span><span class="chips">${m.controlled ? `<span class="chip cs">${m.controlled}</span>` : ''}${m.override ? '<span class="chip ov">OVERRIDE LIST</span>' : ''}</span></span><span class="m-when mono">On hand ${db.inventory[id]}</span></div>`; }).join('')}</div>`,
+    return { title: T('find'), body: `<input type="search" id="gfsearch" placeholder="Search medication (generic or brand)" data-filter aria-label="Search medications">
+      <div class="mlist">${ids.map(id => { const m = F[id]; return `<div class="mrow static" data-filterable="${esc(m.name + ' ' + m.brand)}"><span class="m-name"><b>${esc(medLabel(id))}</b> <span class="muted">${esc(medDesc(id))}</span><span class="m-sig">${D().station} · ${locText(id)}</span><span class="chips">${m.controlled ? `<span class="chip cs">${m.controlled}</span>` : ''}${m.override ? '<span class="chip ov">OVERRIDE LIST</span>' : ''}</span></span><span class="m-when mono">On hand ${db.inventory[id]}</span></div>`; }).join('')}</div>`,
       footer: `<button class="btn" data-act="home">Home</button>` };
   },
 
@@ -517,7 +526,7 @@ const SCREENS = {
 
   prefs() {
     const u = db.users[session.user];
-    return { title: 'User Preferences', body: `<div class="prefs">
+    return { title: T('prefs'), body: `<div class="prefs">
       <div class="pref"><div><b>Password</b><span class="muted">Passwords are 6–8 letters or numbers. Change it every 3 months.</span></div><button class="btn" data-act="changePw">Change Password</button></div>
       <div class="pref"><div><b>BioID fingerprint</b><span class="muted">${u.bioid ? 'Registered.' : 'Not registered.'} Re-register if you injure the finger you enrolled.</span></div><button class="btn" data-act="regBio">${u.bioid ? 'Change BioID' : 'Register BioID'}</button></div>
       <div class="pref"><div><b>This device's fingerprint / Face ID</b><span class="muted">${u.deviceCred ? 'Linked on this device.' : deviceBioOk ? 'Available on this device.' : 'Not available in this browser. Use the simulated BioID scanner.'}</span></div>
@@ -537,7 +546,9 @@ function addTx(t) { db.tx.push({ id: uid(), t: Date.now(), user: session.user, .
 /* ---------- actions ---------- */
 const ACT = {
   signin: () => signInFlow(),
-  home: () => { session.editList = null; go('home'); },
+  home: () => { session.editList = null; session.pending = null; go('home'); },
+  act1: ds => { const my = (db.myPatients[session.user] || []).length; go('patients', { pending: ds.to, listTab: my ? 'my' : 'all', sel: null }); },
+  pickPt: ds => { session.sel = ds.id; patientAction(session.pending); },
   signout: () => signOut(),
   go: ds => go(ds.to),
   noop: () => {},
@@ -574,7 +585,7 @@ function signOut() {
   if (!session.user) return;
   emit('signout', {});
   cancelFlows();
-  session.user = null; session.sel = null; session.cart = []; session.editList = null; session.alerted = null;
+  session.user = null; session.sel = null; session.cart = []; session.editList = null; session.alerted = null; session.pending = null;
   go('standby');
 }
 
@@ -696,7 +707,7 @@ async function createUserFlow() {
 
 async function registerBioFlow(user) {
   const choose = await modal({ title: 'Register BioID', body: `<p>Choose how to enroll your fingerprint.</p>
-      <label class="radio"><input type="radio" name="how" value="sim" checked> <span><b>MedStation BioID scanner (simulated)</b><br><span class="muted">Press and hold the on-screen scanner three times, like the real enrollment.</span></span></label>
+      <label class="radio"><input type="radio" name="how" value="sim" checked> <span><b>${D().name} BioID scanner (simulated)</b><br><span class="muted">Press and hold the on-screen scanner three times, like the real enrollment.</span></span></label>
       <label class="radio"><input type="radio" name="how" value="device"${deviceBioOk ? '' : ' disabled'}> <span><b>This phone or laptop's fingerprint / Face ID</b><br><span class="muted">${deviceBioOk ? 'Uses your device\'s built-in biometrics. Nothing leaves your device.' : 'Not available in this browser.'}</span></span></label>`,
     buttons: [{ label: 'Cancel', value: 'cancel' }, { label: 'Continue', value: 'ok', primary: true }] });
   if (choose.value !== 'ok') return false;
@@ -709,7 +720,7 @@ async function registerBioFlow(user) {
     msg = ''; i++;
   }
   user.bioid = true; save();
-  await info('BioID Registered', '<p>Your fingerprint is registered. You can sign in with BioID at any MedStation where you have access.</p>');
+  await info('BioID Registered', '<p>Your fingerprint is registered. You can sign in with BioID at any cabinet where you have access.</p>');
   return true;
 }
 
@@ -797,7 +808,7 @@ function cartItem(medId, dose, extra) {
 
 async function selectOrder(oid) {
   const o = orderById(oid), p = PAT(session.sel), m = F[o.med];
-  if (session.cart.some(c => c.orderId === oid)) return toast('Already in Selected Meds.');
+  if (session.cart.some(c => c.orderId === oid)) return toast(`Already in ${T('selected')}.`);
   const s = orderStatus(o);
   const cont = async (title, body) => (await modal({ title, cls: 'alert', body, buttons: [{ label: 'Continue', value: 'go' }, { label: 'Cancel', value: 'no', primary: true }] })).value === 'go';
   if (s.kind === 'given' && !await cont('<span class="alert-title">Dose Already Removed</span>', `<p>This scheduled dose was removed at <b>${hhmm(s.at)}</b> by ${esc(userName(s.by))}. Removing it again could cause a <b>double dose</b>.</p><p class="muted">Check the MAR before continuing.</p>`)) return;
@@ -815,7 +826,7 @@ async function selectOrder(oid) {
 
 async function selectOverride(medId) {
   const p = PAT(session.sel);
-  if (session.cart.some(c => c.med === medId && c.override)) return toast('Already in Selected Meds.');
+  if (session.cart.some(c => c.med === medId && c.override)) return toast(`Already in ${T('selected')}.`);
   const allergy = p.allergies.find(a => (ALLERGY_CLASSES[a.key] || []).includes(medId));
   if (allergy) {
     const r = await modal({ title: '<span class="alert-title">Allergy Alert</span>', cls: 'alert', body: `<p><b>${esc(patName(p))}</b> has a documented allergy to <b>${esc(allergy.agent)}</b> (${esc(allergy.reaction)}).</p><p>You selected <b>${esc(medLabel(medId))}</b>.</p><p class="muted">Stop and clarify with the prescriber before giving any medication the patient is allergic to.</p>`,
@@ -845,7 +856,7 @@ async function runRemoval() {
   if (items.some(i => i.override)) {
     const r = await modal({ title: 'Override Warning', cls: 'alert', body: `<p>You are removing medication <b>without pharmacist review</b> of the order. Select the reason for the override.</p>
         ${OVERRIDE_REASONS.map((x, i) => `<label class="radio"><input type="radio" name="reason" value="${esc(x)}"${i ? '' : ''}> <span>${esc(x)}</span></label>`).join('')}`,
-      buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Remove Meds', value: 'ok', primary: true }],
+      buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: T('removeMeds'), value: 'ok', primary: true }],
       validate: (v, d) => d.reason ? null : 'Select an override reason.' });
     if (r.value !== 'ok') return;
     reason = r.data.reason;
@@ -862,7 +873,7 @@ async function runRemoval() {
       ${done.length ? `<ul class="summary">${lines}</ul>` : '<p>No medications were removed.</p>'}
       <div class="teach"><b>At the bedside:</b> verify the rights of medication administration, scan the patient's ID band and each medication barcode, then document on the eMAR. Label any syringe that leaves your hands.</div>`,
     buttons: [{ label: 'Done', value: 'ok', primary: true }] });
-  go('patients');
+  if (D().actionFirst) { session.pending = null; go('home'); } else go('patients');
 }
 
 async function removeItem(p, it, reason) {
@@ -892,11 +903,11 @@ async function removeItem(p, it, reason) {
       break;
     }
   }
-  const r = await step({ title: `Remove · ${esc(medLabel(it.med))}`, body: `${drawerView(it.med, { contents: m.controlled ? 'items' : 'label' })}
+  const r = await step({ title: `${T('remove')} · ${esc(medLabel(it.med))}`, body: `${drawerView(it.med, { contents: m.controlled ? 'items' : 'label' })}
       <div class="take"><div class="take-n">${it.qty}</div><div><b>Remove ${it.qty} ${unitWord(it.med, it.qty)}</b> of ${esc(medLabel(it.med))} ${esc(medDesc(it.med))}<br>
       <span class="muted">Dose to administer: ${num(it.dose)} ${m.unit}${it.override ? ' · OVERRIDE' : ''}</span></div></div>
       <p class="muted">Take the medication, check the label against the order, then close the ${m.loc.type === 'Fridge' ? 'refrigerator bin' : 'drawer'}.</p>`,
-    buttons: [{ label: 'Cancel Med', value: 'cancel' }, { label: 'Remove & Close Drawer', value: 'ok', primary: true }] });
+    buttons: [{ label: 'Cancel Med', value: 'cancel' }, { label: `${T('remove')} & Close Drawer`, value: 'ok', primary: true }] });
   if (r.value !== 'ok') return null;
 
   db.inventory[it.med] -= it.qty; db.physical[it.med] -= it.qty;
@@ -916,11 +927,11 @@ async function removeItem(p, it, reason) {
       buttons: [{ label: 'Waste Later', value: 'later' }, { label: 'Waste Now', value: 'now', primary: true }] });
     if (w.value === 'now') {
       const ok = await wasteFlow(rem);
-      if (!ok) { rem.undocumented = true; wasteNote = 'Waste not documented — listed under Undocumented Waste.'; }
+      if (!ok) { rem.undocumented = true; wasteNote = 'Waste not documented — listed under ' + T('undoc') + '.'; }
       else wasteNote = `Wasted ${amtText(it.med, rem.wasted)} with ${esc(userName(rem.witness))}.`;
     } else {
       rem.undocumented = true; emit('waste_later', { med: it.med, patient: p.id });
-      wasteNote = 'Waste Later selected — document it from Undocumented Waste as soon as possible.';
+      wasteNote = 'Waste Later selected — document it from ' + T('undoc') + ' as soon as possible.';
     }
   } else if (!m.controlled && !m.noSplit && expectedWaste > 0) {
     wasteNote = `Discard the unused ${amtText(it.med, expectedWaste)} per facility policy (non-controlled, no witness needed).`;
@@ -1042,7 +1053,7 @@ async function resolveDiscrepancy(d) {
 /* ---------- reports / clipboard ---------- */
 function reportText() {
   const list = db.tx.filter(t => session.reportAll || t.user === session.user).sort((a, b) => a.t - b.t);
-  return `MedStation Practice — Activity report (${session.reportAll ? 'all users' : userName(session.user)}) — ${dateStr(Date.now())}\n` +
+  return `${D().model} practice — Activity report (${session.reportAll ? 'all users' : userName(session.user)}) — ${dateStr(Date.now())}\n` +
     list.map(t => `${hhmm(t.t)}  ${t.type.padEnd(11)} ${t.patient ? patName(PAT(t.patient)) : '—'} | ${medLabel(t.med)} ${medDesc(t.med)} | ${t.amount} | user ${userName(t.user)}${t.witness ? ' | witness ' + userName(t.witness) : ''}${t.note ? ' | ' + t.note : ''}`).join('\n');
 }
 function copyText(txt) {
@@ -1054,19 +1065,21 @@ function copyText(txt) {
 const coach = $('#coach');
 function renderCoach() {
   const sc = db.scen, S = sc && scenById(sc.id);
-  let html = `<div class="coach-head"><h2>Practice Coach</h2><button class="btn small ghost only-narrow" data-cact="toDevice">Back to MedStation ↑</button></div>`;
+  let html = `<div class="coach-head"><h2>Practice Coach</h2><button class="btn small ghost only-narrow" data-cact="toDevice">Back to cabinet ↑</button></div>
+    <div class="dev-switch" role="radiogroup" aria-label="Cabinet type">${Object.values(DEVICES).map(d => `<button role="radio" aria-checked="${D().key === d.key}" class="${D().key === d.key ? 'on' : ''}" data-cact="device" data-dev="${d.key}"><b>${d.key === 'pyxis' ? 'Pyxis' : 'Omnicell'}</b><span>${d.model}</span></button>`).join('')}</div>
+    ${D().actionFirst ? '<p class="small muted dev-note"><b>Omnicell workflow:</b> choose the action first (Issue, Return or Waste) from the main menu, then select the patient. "Issue" is Omnicell\'s word for removing a medication.</p>' : '<p class="small muted dev-note"><b>Pyxis workflow:</b> select the patient first, then choose Remove, Return, Waste or Override.</p>'}`;
   if (S) {
     const stepsHtml = S.steps.map((s, i) => {
       const state = sc.missed.includes(i) ? 'missed' : i < sc.step ? 'done' : i === sc.step && !sc.done ? 'current' : 'todo';
-      return `<li class="st ${state}"><span class="st-mark" aria-hidden="true">${state === 'done' ? '✓' : state === 'missed' ? '✕' : i + 1}</span><div><span>${s.text}</span>${state === 'current' && s.hint ? `<details class="hint"><summary>Hint</summary><p>${s.hint}</p></details>` : ''}${state === 'missed' ? '<span class="small bad">Missed or out of order</span>' : ''}</div></li>`;
+      return `<li class="st ${state}"><span class="st-mark" aria-hidden="true">${state === 'done' ? '✓' : state === 'missed' ? '✕' : i + 1}</span><div><span>${devText(s.text)}</span>${state === 'current' && s.hint ? `<details class="hint"><summary>Hint</summary><p>${devText(s.hint)}</p></details>` : ''}${state === 'missed' ? '<span class="small bad">Missed or out of order</span>' : ''}</div></li>`;
     }).join('');
-    html += `<div class="scen"><div class="scen-top"><span class="lvl">${S.level}</span><h3>${S.title}</h3></div><div class="brief">${S.brief}</div>
+    html += `<div class="scen"><div class="scen-top"><span class="lvl">${S.level}</span><h3>${S.title}</h3></div><div class="brief">${devText(S.brief)}</div>
       <ol class="steps">${stepsHtml}</ol>
       ${sc.errors.length ? `<div class="errs"><b>Safety concerns</b><ul>${sc.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : ''}
       ${sc.done ? resultHtml(sc, S) : ''}
       <div class="coach-btns"><button class="btn small" data-cact="restart">Restart</button><button class="btn small ghost" data-cact="exit">Exit scenario</button></div></div>`;
   } else {
-    html += `<p class="coach-intro">You are in <b>free practice</b>. Explore the MedStation, or choose a guided scenario for step-by-step coaching and feedback.</p>`;
+    html += `<p class="coach-intro">You are in <b>free practice</b>. Explore the ${D().name}, or choose a guided scenario for step-by-step coaching and feedback.</p>`;
   }
   html += `<details class="coach-sec" ${S && !sc.done ? '' : 'open'}><summary>Guided scenarios</summary><ul class="scen-list">${SCENARIOS.map(s => `<li><button class="scen-btn ${sc && sc.id === s.id ? 'on' : ''}" data-cact="start" data-id="${s.id}"><span class="lvl">${s.level}</span><span>${s.title}</span></button></li>`).join('')}</ul><p class="small muted">Starting a scenario resets patients, inventory and transactions (practice accounts are kept).</p></details>
     <details class="coach-sec"><summary>Practice accounts</summary><ul class="small">
@@ -1096,16 +1109,17 @@ coach.addEventListener('click', e => {
   if (a === 'start') startScenario(b.dataset.id);
   else if (a === 'restart') startScenario(db.scen.id);
   else if (a === 'exit') { db.scen = null; save(); renderCoach(); }
+  else if (a === 'device') { if (db.settings.device !== b.dataset.dev) { db.settings.device = b.dataset.dev; save(); signOutQuiet(); toast(`Switched to ${D().model}.`); } }
   else if (a === 'toDevice') $('#device').scrollIntoView({ behavior: 'smooth' });
   else if (a === 'resetPractice') { freshPractice(); db.scen = null; save(); signOutQuiet(); toast('Practice data reset.'); }
   else if (a === 'resetAll') { db = freshDb(); save(); signOutQuiet(); toast('Everything reset, including practice accounts.'); }
   else if (a === 'copyResult') {
     const sc = db.scen, S = scenById(sc.id); const secs = Math.round((sc.end - sc.start) / 1000);
-    copyText(`MedStation Practice Simulator — scenario result\nScenario: ${S.title} (${S.level})\nCompleted: ${new Date(sc.end).toLocaleString()}\nSteps: ${S.steps.length - sc.missed.length}/${S.steps.length}\nMissed: ${sc.missed.map(i => S.steps[i].text.replace(/<[^>]+>/g, '')).join('; ') || 'none'}\nSafety concerns: ${sc.errors.join('; ') || 'none'}\nTime: ${Math.floor(secs / 60)} min ${secs % 60} s`);
+    copyText(`MedStation Practice Simulator — scenario result\nCabinet: ${D().model}\nScenario: ${S.title} (${S.level})\nCompleted: ${new Date(sc.end).toLocaleString()}\nSteps: ${S.steps.length - sc.missed.length}/${S.steps.length}\nMissed: ${sc.missed.map(i => S.steps[i].text.replace(/<[^>]+>/g, '')).join('; ') || 'none'}\nSafety concerns: ${sc.errors.join('; ') || 'none'}\nTime: ${Math.floor(secs / 60)} min ${secs % 60} s`);
   }
 });
 coach.addEventListener('change', e => { if (e.target.dataset.cact === 'challenge') { db.settings.challenge = e.target.checked; save(); toast(e.target.checked ? 'Challenge mode on: calculate waste yourself.' : 'Challenge mode off.'); } });
-function signOutQuiet() { cancelFlows(); session.user = null; session.sel = null; session.cart = []; go('standby'); }
+function signOutQuiet() { cancelFlows(); session.user = null; session.sel = null; session.cart = []; session.pending = null; go('standby'); }
 
 $('#coachJump').addEventListener('click', () => $('#coach').scrollIntoView({ behavior: 'smooth' }));
 

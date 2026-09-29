@@ -1,8 +1,22 @@
 # MedStation Practice Simulator
 
-A browser-based practice version of an automated medication dispensing cabinet, built so nursing students can rehearse Pyxis-style MedStation workflows before clinical. It runs on laptops, tablets and phones and needs no install, accounts or server.
+A browser-based practice version of an automated medication dispensing cabinet, built so nursing students can rehearse **Pyxis-style** and **Omnicell-style** workflows before clinical. It runs on laptops, tablets and phones and needs no install, accounts or server.
 
-> Educational simulator. Workflows are modeled on published BD Pyxis™ MedStation™ ES job aids and a Pyxis MedStation 3000 training manual. This project is not affiliated with or endorsed by BD. All patients, orders and users are fictional. Do not enter real patient information.
+> Educational simulator. Workflows are modeled on published BD Pyxis™ MedStation™ ES job aids, a Pyxis MedStation 3000 training manual, and common Omnicell® XT cabinet workflows. This project is not affiliated with or endorsed by BD or Omnicell. All patients, orders and users are fictional. Do not enter real patient information.
+
+## Two cabinet types
+
+Switch at the top of the **Practice Coach**. Patients, inventory and scenarios are shared, so students can practice the same task on both.
+
+| | Pyxis mode | Omnicell mode |
+| --- | --- | --- |
+| Workflow order | Patient first, then Remove / Return / Waste / Override | Action first (Issue / Return / Waste from the main menu), then patient |
+| Taking a medication out | **Remove** | **Issue** |
+| Order tabs | Due Now · PRN · All Orders | Scheduled · PRN · All Orders |
+| Waste left for later | Undocumented Waste | Pending Waste |
+| Drawer terms | MiniDrawer, Matrix, CUBIE, pocket light | SinglePointe drawer, open matrix, lidded bin, Guiding Light |
+
+The Omnicell mode follows general Omnicell XT conventions. Facility builds differ, so share your facility's Omnicell job aids to tune the wording.
 
 ## What students can practice
 
