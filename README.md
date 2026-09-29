@@ -6,7 +6,7 @@ A browser-based practice version of an automated medication dispensing cabinet, 
 
 ## Two cabinet types
 
-Switch at the top of the **Practice Coach**. Patients, medications and all 10 scenarios are shared, so students can practice the same task on both cabinets.
+Switch at the top of the **Practice Coach**. Patients, medications and the scenarios are shared, so students can practice the same task on both cabinets.
 
 | | Pyxis mode | Omnicell mode (Color Touch 22.5 user guide) |
 | --- | --- | --- |
@@ -35,11 +35,15 @@ Switch at the top of the **Practice Coach**. Patients, medications and all 10 sc
 | **Waste** | Waste Now or Waste Later with a witness who signs in with their own credentials. A reason is required when the amount differs from expected. Undocumented waste shows on the Home screen. |
 | **Return** | Return unopened items to the return bin (witness required for controlled substances). |
 | **Discrepancies** | Investigate recent transactions, recount, pick a reason, comment and have a witness co-sign. |
+| **Temporary patients** | Pyxis *Add Temporary Patient* / Omnicell *Add New Patient*: last name and room required, DOB all-or-nothing, duplicate-ID check, TEMPORARY/TMP flag. Medications come out on override. |
+| **System kits** | Hypoglycemia Rescue, Opioid Reversal and Anaphylaxis kits (Pyxis *System Kits*, Omnicell *Remove Kits*). Kits count as an override on a profiled cabinet. |
+| **Nurse-prepared orders** | Selecting the order selects every component (drug + diluent); dose can't be changed; Component Details; skipping a component is a partial issue. |
+| **Anywhere RN** (Omnicell) | A nurses' station window to create issue/return requests for My Patients; at log-on the cabinet shows the pending requests (Issue / Return / Proceed with Login) and a Notice of Incomplete Items when needed. |
 | **Global Find & Reports** | Locate any medication; activity report by current user or the whole device (copy or print). |
 
 ## Guided scenarios
 
-The **Practice Coach** panel walks through 10 scenarios with step checklists, hints, safety-error detection and a copyable result for instructors:
+The **Practice Coach** panel walks through 14 scenarios with step checklists, hints, safety-error detection and a copyable result for instructors:
 
 1. Sign in & build My Patients
 2. Remove a scheduled oral med (digoxin with apical pulse CDC)
@@ -51,6 +55,10 @@ The **Practice Coach** panel walks through 10 scenarios with step checklists, hi
 8. Safety stop: allergy alert on override
 9. Hold parameter: metoprolol (HR 54, SBP 98)
 10. Blind count discrepancy (fentaNYL pocket is one short)
+11. Add a temporary patient (ADT downtime) and override ondansetron
+12. Remove a system kit (Hypoglycemia Rescue Kit)
+13. Nurse-prepared med order (cefTRIAXone vial + sterile water diluent)
+14. Anywhere RN remote request (Omnicell only)
 
 **Dosage-calculation challenge** (Coach → Settings) hides the calculated waste, so students must work out the amount and the volume (amount ÷ concentration) themselves.
 

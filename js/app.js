@@ -23,10 +23,11 @@ const medDesc = id => { const m = F[id]; return m.desc || `${num(m.strength)} ${
 const unitWord = (id, q) => { const f = F[id].form; const w = { tab: 'tab', cap: 'cap', vial: 'vial', Carpuject: 'Carpuject', syringe: 'syringe', pen: 'pen', neb: 'nebule', kit: 'kit' }[f] || f; return q === 1 ? w : w + 's'; };
 const volOf = (id, amt) => { const m = F[id]; return m.volume ? amt * m.volume / m.strength : null; };
 const amtText = (id, amt) => { const v = volOf(id, amt); return `${num(amt)} ${F[id].unit}` + (v != null ? ` (${num(v)} mL)` : ''); };
-const PAT = id => PATIENTS.find(p => p.id === id);
+const allPatients = () => [...PATIENTS, ...((typeof db !== 'undefined' && db && db.tempPatients) || [])];
+const PAT = id => allPatients().find(p => p.id === id);
 const patName = p => `${p.last}, ${p.first} ${p.mi || ''}`.trim();
-const age = dob => { const b = new Date(dob), n = new Date(); let a = n.getFullYear() - b.getFullYear(); if (n < new Date(n.getFullYear(), b.getMonth(), b.getDate())) a--; return a; };
-const fmtDob = dob => { const [y, m, d] = dob.split('-'); return `${m}/${d}/${y}`; };
+const age = dob => { if (!dob) return '?'; const b = new Date(dob), n = new Date(); let a = n.getFullYear() - b.getFullYear(); if (n < new Date(n.getFullYear(), b.getMonth(), b.getDate())) a--; return a; };
+const fmtDob = dob => { if (!dob) return 'Unknown'; const [y, m, d] = dob.split('-'); return `${m}/${d}/${y}`; };
 const orderById = oid => { for (const p of PATIENTS) { const o = p.orders.find(x => x.id === oid); if (o) return o; } return null; };
 const doseText = o => o.dose != null ? `${num(o.dose)}` : `${num(o.doseMin)}–${num(o.doseMax)}`;
 const sig = o => `${doseText(o)} ${F[o.med].unit} ${F[o.med].route} ${o.freq}${o.prn ? ' PRN ' + o.prn : ''}`;
@@ -69,7 +70,7 @@ function freshPractice(base = db) {
   base.base = Date.now();
   base.inventory = {}; base.physical = {};
   for (const [id, m] of Object.entries(F)) { base.inventory[id] = m.count; base.physical[id] = m.count + (m.physicalOffset || 0); }
-  base.orders = {}; base.tx = []; base.removals = []; base.discrepancies = []; base.myPatients = {}; base.shortList = [];
+  base.orders = {}; base.tx = []; base.removals = []; base.discrepancies = []; base.myPatients = {}; base.shortList = []; base.tempPatients = []; base.remote = [];
   return base;
 }
 function freshDb() { return freshPractice({ v: 1, users: clone(USERS), settings: { challenge: false }, scen: null }); }
@@ -81,6 +82,8 @@ function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); } c
 db = load();
 // Keep the simulated shift current if the student comes back another day.
 if (!db.settings.device) db.settings.device = 'pyxis';
+if (!db.tempPatients) db.tempPatients = [];
+if (!db.remote) db.remote = [];
 if (Date.now() - db.base > 10 * HOUR) { db.base = Date.now(); db.orders = {}; }
 
 const session = { user: null, screen: 'standby', listTab: 'my', sel: null, mode: 'remove', tab: 'due', cart: [], reportAll: false };
@@ -112,6 +115,7 @@ function emit(type, data = {}) {
 
 function startScenario(id) {
   const S = scenById(id);
+  if (S.device && db.settings.device !== S.device) { db.settings.device = S.device; toast(`This scenario uses the ${DEVICES[S.device].model} cabinet — switched for you.`); }
   freshPractice();
   if (id === 's1') Object.assign(db.users.student, { password: '123456', mustChange: true, bioid: false, deviceCred: null, bioPrompted: false });
   // Later scenarios assume the student already has My Patients set up.
@@ -323,11 +327,11 @@ function patientCounts(p) {
   p.orders.forEach(o => { const s = orderStatus(o); if (s.kind === 'due' || s.kind === 'pastdue') due++; if (s.kind === 'pastdue') past = true; if (s.kind === 'prn') prn++; });
   return { due, past, prn, all: p.orders.length };
 }
-const allergyText = p => p.allergies.length ? p.allergies.map(a => `${a.agent} (${a.reaction})`).join(', ') : 'NKDA';
+const allergyText = p => p.allergyUnknown ? 'Unknown — check MAR' : p.allergies.length ? p.allergies.map(a => `${a.agent} (${a.reaction})`).join(', ') : 'NKDA';
 
 function patientBanner(p) {
   return `<div class="pt-banner">
-    <div class="pt-id"><b>${esc(patName(p))}</b>${p.nameAlert ? '<span class="chip alert">NAME ALERT</span>' : ''}
+    <div class="pt-id"><b>${esc(patName(p))}</b>${p.nameAlert ? '<span class="chip alert">NAME ALERT</span>' : ''}${p.temp ? '<span class="chip temp">TEMPORARY</span>' : ''}
       <span class="muted">MRN <span class="mono">${p.mrn}</span> · DOB <span class="mono">${fmtDob(p.dob)}</span> (${age(p.dob)} y, ${p.sex}) · Rm <span class="mono">${p.room}</span></span></div>
     <div class="pt-allergy ${p.allergies.length ? 'has' : ''}"><b>Allergies:</b> ${esc(allergyText(p))}</div>
     <div class="pt-dx muted">${esc(p.dx)} · ${esc(p.provider)}</div>
@@ -390,7 +394,7 @@ const SCREENS = {
       ${disc ? `<button class="banner red" data-act="go" data-to="disc"><b>Unresolved discrepancy on this device.</b> Resolve before the end of your shift.</button>` : ''}
       <div class="tiles">
         ${tile('list', 'my', 'My Patients', my ? `${my} patient${my > 1 ? 's' : ''} on your list` : 'Build your assignment list')}
-        ${tile('list', 'all', T('allPts'), `${PATIENTS.length} patients on 4 West`)}
+        ${tile('list', 'all', T('allPts'), `${allPatients().length} patients on 4 West`)}
         ${tile('go', 'undoc', T('undoc'), undoc ? `${undoc} to document` : 'Nothing pending', undoc ? 'warn' : '', undoc ? `<span class="badge">${undoc}</span>` : '')}
         ${tile('go', 'disc', 'Discrepancies', disc ? `${disc} unresolved` : 'None open', disc ? 'danger' : '', disc ? `<span class="badge red">${disc}</span>` : '')}
         ${tile('go', 'find', T('find'), 'Locate any medication')}
@@ -402,7 +406,7 @@ const SCREENS = {
   patients() {
     const u = session.user;
     const my = session.listTab === 'my';
-    const ids = my ? (db.myPatients[u] || []) : PATIENTS.map(p => p.id);
+    const ids = my ? (db.myPatients[u] || []) : allPatients().map(p => p.id);
     const list = ids.map(PAT).filter(Boolean).sort((a, b) => a.last.localeCompare(b.last) || a.first.localeCompare(b.first));
     const sel = list.find(p => p.id === session.sel) ? session.sel : null;
     const rows = list.map(p => {
@@ -410,7 +414,7 @@ const SCREENS = {
       const undoc = db.removals.some(r => r.undocumented && r.patient === p.id);
       return `<div class="prow ${sel === p.id ? 'sel' : ''} ${c.past ? 'pastdue' : ''}" data-filterable="${esc(p.last + ' ' + p.first + ' ' + p.room + ' ' + p.mrn)}">
         <button class="prow-main" data-act="selPatient" data-id="${p.id}" aria-pressed="${sel === p.id}">
-          <span class="pr-name"><span class="pr-title"><b>${esc(patName(p))}</b>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}${p.allergies.length ? ' <span class="chip allergy">ALLERGY</span>' : ''}${undoc ? ' <span class="chip waste">UNDOC WASTE</span>' : ''}</span>
+          <span class="pr-name"><span class="pr-title"><b>${esc(patName(p))}</b>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}${p.temp ? ' <span class="chip temp">TEMPORARY</span>' : ''}${p.allergies.length ? ' <span class="chip allergy">ALLERGY</span>' : ''}${undoc ? ' <span class="chip waste">UNDOC WASTE</span>' : ''}</span>
             <span class="muted small"><span class="rm-inline">Rm <span class="mono">${p.room}</span> · </span>MRN <span class="mono">${p.mrn}</span> · DOB <span class="mono">${fmtDob(p.dob)}</span></span></span>
           <span class="pr-room mono">${p.room}</span>
         </button>
@@ -423,7 +427,7 @@ const SCREENS = {
     return { title: my ? 'My Patients' : T('allPts'), body: `
       <div class="seg" role="tablist"><button class="${my ? 'on' : ''}" data-act="list" data-to="my" role="tab" aria-selected="${my}">My Patients</button><button class="${!my ? 'on' : ''}" data-act="list" data-to="all" role="tab" aria-selected="${!my}">${T('allPts')}</button></div>
       <div class="list-tools"><input id="ptsearch" type="search" placeholder="Search last name, room or MRN" data-filter aria-label="Search patients">
-        ${my ? '<button class="btn" data-act="go" data-to="editMy">Edit Patient List</button>' : ''}</div>
+        ${my ? '<button class="btn" data-act="go" data-to="editMy">Edit Patient List</button>' : '<button class="btn" data-act="addTemp">Add Temporary Patient</button>'}</div>
       ${list.length ? `<div class="ptable"><div class="phead"><span>Patient</span><span>Room</span><span class="pr-col">${T('due')}</span><span class="pr-col">PRN</span><span class="pr-col">All Orders</span></div>${rows}</div>
         <p class="legend"><span class="dot mini"></span> due now · <span class="dot mini past"></span> past due (orange bar) · tap a dot to open that tab</p>`
       : `<div class="empty"><b>Your My Patients list is empty.</b><p>Select <b>Edit Patient List</b> and add the patients you are assigned to today.</p><button class="btn primary" data-act="go" data-to="editMy">Edit Patient List</button></div>`}`,
@@ -436,7 +440,7 @@ const SCREENS = {
     const mine = session.editList;
     return { title: 'Edit My Patients', body: `<p class="muted">Tap a patient on the left to add them to your list. Tap × to remove.</p>
       <div class="two-col">
-        <div><h3>${T('allPts')}</h3>${PATIENTS.map(p => `<button class="pick ${mine.includes(p.id) ? 'added' : ''}" data-act="addMy" data-id="${p.id}"${mine.includes(p.id) ? ' disabled' : ''}><b>${esc(patName(p))}</b> <span class="mono muted">${p.room}</span>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}</button>`).join('')}</div>
+        <div><h3>${T('allPts')}</h3>${allPatients().map(p => `<button class="pick ${mine.includes(p.id) ? 'added' : ''}" data-act="addMy" data-id="${p.id}"${mine.includes(p.id) ? ' disabled' : ''}><b>${esc(patName(p))}</b> <span class="mono muted">${p.room}</span>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}</button>`).join('')}</div>
         <div><h3>My Patients (${mine.length})</h3>${mine.length ? mine.map(id => { const p = PAT(id); return `<div class="pick in"><span><b>${esc(patName(p))}</b> <span class="mono muted">${p.room}</span></span><button class="x" data-act="delMy" data-id="${id}" aria-label="Remove ${esc(patName(p))}">×</button></div>`; }).join('') : '<p class="muted">No patients yet.</p>'}</div>
       </div>`,
       footer: `<button class="btn" data-act="cancelMy">Cancel</button><button class="btn primary" data-act="saveMy">Accept</button>` };
@@ -484,7 +488,7 @@ const SCREENS = {
         </section>
         <aside class="cart"><h3>${T('selected')} <span class="muted">(${cart.length})</span></h3>${cartHtml}</aside>
       </div>`,
-      footer: `<button class="btn" data-act="backList">Back</button>${ov ? `<button class="btn" data-act="mode" data-m="remove">${T('profile')}</button>` : '<button class="btn override" data-act="mode" data-m="override">Override</button>'}<button class="btn primary" data-act="removeMeds"${cart.length ? '' : ' disabled'}>${T('removeMed')}</button>` };
+      footer: `<button class="btn" data-act="backList">Back</button>${ov ? `<button class="btn" data-act="mode" data-m="remove">${T('profile')}</button>` : '<button class="btn override" data-act="mode" data-m="override">Override</button>'}<button class="btn" data-act="kitsModal">System Kits</button><button class="btn primary" data-act="removeMeds"${cart.length ? '' : ' disabled'}>${T('removeMed')}</button>` };
   },
 
   returns() {
@@ -585,13 +589,20 @@ const ACT = {
   osort: () => { session.sortRoom = !session.sortRoom; render(); },
   otab: ds => { if (ds.t === 'stocked' && session.tab !== 'stocked') emit('patient_action', { patient: session.sel, action: 'override' }); session.tab = ds.t; render(); },
   pickStocked: ds => omniSelectStocked(ds.id),
-  unpickKey: ds => { session.cart = session.cart.filter(c => c.key !== ds.key); render(); },
+  unpickKey: async ds => {
+    const comp = session.cart.find(c => c.key === ds.key && c.nursePrep && session.cart.filter(x => x.group === c.group).length > 1);
+    if (comp && (await modal({ title: 'Partial Issue', body: '<p>Removing one component of a nurse-prepared med order results in a <b>partial issue</b> of the order. Follow hospital policy.</p>', buttons: [{ label: 'Keep Component', value: 'no', primary: true }, { label: 'Remove Component', value: 'yes' }] })).value !== 'yes') return;
+    session.cart = session.cart.filter(c => comp ? c.key !== ds.key : (c.key !== ds.key && c.group !== ds.key)); render(); },
+  addTemp: () => addTempPatient(),
+  kitsModal: () => kitsModal(),
+  kitPick: ds => pickKit(ds.id).then(() => render()),
   cancelMedList: () => { session.cart = []; render(); },
   inactiveOrder: ds => { const o = orderById(ds.id); info('Inactive Med Order', `<p><b>${esc(medLabel(o.med))}</b> ${esc(sig(o))}</p><p>This med order cannot be issued because it is not time to administer it to the patient (next due ${hhmm(orderStatus(o).due)}).</p>`); },
   allergyInfo: () => { const p = PAT(session.sel); info('Allergy Info', p.allergies.length ? `<ul>${p.allergies.map(a => `<li><b>${esc(a.agent)}</b> — ${esc(a.reaction)}</li>`).join('')}</ul>` : '<p>No known allergies are displayed. Check the MAR.</p>'); },
   retTab: ds => { session.retAll = ds.all === '1'; render(); },
   wasteTab: ds => { session.wasteTab = ds.t; render(); },
   oRep: ds => { session.oRep = ds.t; render(); },
+  kitTab: ds => { session.kitTab = ds.t; render(); },
   list: ds => go('patients', { listTab: ds.to }),
   selPatient: ds => { session.sel = ds.id; render(); },
   dot: ds => { session.sel = ds.id; patientAction('remove', ds.tab); },
@@ -643,7 +654,7 @@ async function patientAction(action, tab) {
     else if (tab) session.tab = tab;
     else session.tab = c.due ? 'due' : 'all';
     go('profile');
-  } else go({ return: 'returns', waste: 'waste', past: 'past' }[action]);
+  } else if (action === 'kits') { session.cart = []; go('kits'); } else go({ return: 'returns', waste: 'waste', past: 'past' }[action]);
 }
 
 /* ---------- sign in ---------- */
@@ -876,6 +887,7 @@ async function selectOrder(oid) {
     if (h && Date.now() - s.last < h * HOUR && !await cont('<span class="alert-title">Too Soon</span>', `<p>${esc(medLabel(o.med))} was last removed at <b>${hhmm(s.last)}</b>. The order is <b>${o.freq} PRN</b>; the next dose is available at <b>${hhmm(s.last + h * HOUR)}</b>.</p>`)) return;
   }
   }
+  if (o.nursePrep) return selectNursePrep(o);
   const c = await askCdc(o.med, p.id); if (!c.ok) return;
   let dose = o.dose;
   if (dose == null) { dose = await askDose(o.med, { min: o.doseMin, max: o.doseMax }); if (dose == null) return; }
@@ -925,10 +937,14 @@ async function runRemoval() {
   const done = [];
   for (const it of items) {
     const res = isOmni() ? await omniRemoveItem(p, it) : await removeItem(p, it, reason);
-    if (res) done.push(res);
+    if (res) done.push({ ...res, key: it.key });
   }
+  [...new Set(items.filter(i => i.kit).map(i => i.kit))].forEach(k => {
+    if (items.filter(i => i.kit === k).every(i => done.some(d => d.key === i.key))) emit('kit_removed', { kit: k, patient: p.id });
+  });
+  if (items.some(i => i.nursePrep) && items.filter(i => i.nursePrep).some(i => !done.some(d => d.key === i.key))) done.push({ med: items.find(i => i.nursePrep).med, qty: 0, dose: 0, wasteNote: '<b>Partial issue</b> of the nurse-prepared order — one or more components were skipped. Follow hospital policy.' });
   session.cart = [];
-  const lines = done.map(d => `<li><b>${esc(medLabel(d.med))}</b> — removed ${d.qty} ${unitWord(d.med, d.qty)} for a dose of ${num(d.dose)} ${F[d.med].unit}${d.wasteNote ? `<br><span class="muted">${d.wasteNote}</span>` : ''}</li>`).join('');
+  const lines = done.map(d => d.qty === 0 ? `<li>${d.wasteNote}</li>` : `<li><b>${esc(medLabel(d.med))}</b> — removed ${d.qty} ${unitWord(d.med, d.qty)} for a dose of ${num(d.dose)} ${F[d.med].unit}${d.wasteNote ? `<br><span class="muted">${d.wasteNote}</span>` : ''}</li>`).join('');
   await step({ title: isOmni() ? `Remove Complete — ${esc(p.last)}, ${esc(p.first)}` : 'Transaction Complete', body: `${patientBanner(p)}
       ${done.length ? `<ul class="summary">${lines}</ul>` : '<p>No medications were removed.</p>'}
       <div class="teach"><b>At the bedside:</b> verify the rights of medication administration, scan the patient's ID band and each medication barcode, then document on the eMAR. Label any syringe that leaves your hands.</div>`,
@@ -981,8 +997,8 @@ async function afterRemoval(p, it, reason, countNote) {
   const rem = { id: uid(), t: Date.now(), user: session.user, patient: p.id, med: it.med, orderId: it.orderId, qty: it.qty, dose: it.dose, override: it.override, expectedWaste: m.controlled ? expectedWaste : 0, wasted: 0, returnedQty: 0, undocumented: false };
   db.removals.push(rem);
   if (it.orderId) { const o = orderById(it.orderId); db.orders[it.orderId] = { ...(db.orders[it.orderId] || {}), lastRemoved: rem.t, by: session.user, ...(o.prn ? {} : { given: rem.t }) }; }
-  addTx({ type: it.override ? 'Override' : 'Remove', patient: p.id, med: it.med, amount: `${it.qty} ${unitWord(it.med, it.qty)} / dose ${num(it.dose)} ${m.unit}`, note: [reason, it.note].filter(Boolean).join(' · ') });
-  emit('removed', { patient: p.id, med: it.med, override: it.override, dose: it.dose, qty: it.qty });
+  addTx({ type: it.kit ? 'Kit' : it.override ? 'Override' : 'Remove', patient: p.id, med: it.med, amount: `${it.qty} ${unitWord(it.med, it.qty)} / dose ${num(it.dose)} ${m.unit}`, note: [reason, it.note].filter(Boolean).join(' · ') });
+  emit('removed', { patient: p.id, med: it.med, override: it.override, dose: it.dose, qty: it.qty, temp: !!p.temp, kit: it.kit || null });
 
   let wasteNote = countNote;
   if (m.controlled && expectedWaste > 0 && isOmni()) {
@@ -1143,7 +1159,7 @@ function oMenu(active, loggedOn = true) {
     return `<button type="button" class="otab menu${active === k ? ' on' : ''}${flash}" ${to ? `data-act="go" data-to="${to}"` : 'disabled title="Not part of this practice simulator"'}>${l}</button>`;
   }).join('');
 }
-const oTitle = (t, p) => `${t}${p ? `<span class="o-allergy">Allergies: ${p.allergies.length ? esc(allergyText(p)) : 'None known — check MAR'}</span>` : ''}`;
+const oTitle = (t, p) => `${t}${p ? `<span class="o-allergy">Allergies: ${p.allergies.length || p.allergyUnknown ? esc(allergyText(p)) : 'None known — check MAR'}</span>` : ''}`;
 function lastIssue(pid, medId) { const r = db.removals.filter(x => x.patient === pid && x.med === medId).sort((a, b) => b.t - a.t)[0]; return r ? r.t : null; }
 function outstandingOf(rem) { const m = F[rem.med]; return +((rem.qty - (rem.returnedQty || 0)) * m.strength - rem.wasted - (rem.adminDone ? rem.dose : 0)).toFixed(4); }
 
@@ -1166,23 +1182,23 @@ const OMNI = {
   patients() {
     const u = session.user;
     const tab = ['global', 'local', 'partial', 'my'].includes(session.listTab) ? session.listTab : 'local';
-    let ids = PATIENTS.map(p => p.id);
+    let ids = allPatients().map(p => p.id);
     if (tab === 'my') ids = db.myPatients[u] || [];
     if (tab === 'partial') ids = ids.filter(id => db.removals.some(r => r.undocumented && r.patient === id));
     const list = ids.map(PAT).filter(Boolean).sort((a, b) => session.sortRoom ? a.room.localeCompare(b.room) : (a.last.localeCompare(b.last) || a.first.localeCompare(b.first)));
     const rows = list.map(p => {
       const partial = db.removals.some(r => r.undocumented && r.patient === p.id);
       return `<button class="orow pt" data-act="openPt" data-id="${p.id}" data-filterable="${esc(p.last + ' ' + p.first + ' ' + p.room + ' ' + p.mrn)}">
-        <span><b>${esc(p.last)}, ${esc(p.first)}</b>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}${partial ? ' <span class="chip waste">PARTIAL DOSE</span>' : ''}<br>PtID: <span class="mono">${p.mrn}</span><br>MRN: <span class="mono">${p.mrn}-4W</span></span>
+        <span><b>${esc(p.last)}, ${esc(p.first)}</b>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}${p.temp ? ' <span class="chip temp">TEMPORARY</span>' : ''}${partial ? ' <span class="chip waste">PARTIAL DOSE</span>' : ''}<br>PtID: <span class="mono">${p.mrn}</span><br>MRN: <span class="mono">${p.mrn}-4W</span></span>
         <span class="o-mid"><br><br>DOB: <span class="mono">${fmtDob(p.dob)}</span></span>
-        <span>Rm#: <span class="mono">${p.room}</span><br>Pt.Type: INP<br>Area: 4W</span></button>`;
+        <span>Rm#: <span class="mono">${p.room}</span><br>Pt.Type: ${p.temp ? 'TMP' : 'INP'}<br>Area: 4W</span></button>`;
     }).join('');
     const empty = tab === 'my' ? 'Your My Patients list is empty. Press <b>Edit My Patients</b> to add your assigned patients.' : tab === 'partial' ? 'No patients have partial dose issues that require waste.' : 'No patients found.';
     return { title: 'Patient List:', body: `<input type="search" id="ptsearch" class="o-search" placeholder="Type the first few letters of the last name" data-filter aria-label="Search patients">
         <div class="olist">${rows || `<p class="empty-line">${empty}</p>`}</div>`,
       hint: tab === 'partial' ? 'Partial Dose List: patients with undocumented medication issues. Select the patient, then press Waste Meds.' : 'Select a patient from the list. To search for a patient, enter the first few characters of the last name. If the patient is not found, look in the Global List.',
       tabs: [['global', 'Global List'], ['local', 'Local List'], ['partial', 'Partial Dose List'], ['my', 'My Patients']].map(([k, l]) => `<button type="button" class="otab${tab === k ? ' on' : ''}" data-act="olist" data-t="${k}">${l}</button>`).join(''),
-      left: oSide([['Main Menu', 'data-act="home"'], ['Add New Patient', 'disabled title="Not part of this practice simulator"'], ['Find Item', 'data-act="go" data-to="find"'], ...(tab === 'my' ? [['Edit My Patients', 'data-act="go" data-to="editMy"']] : [])]),
+      left: oSide([['Main Menu', 'data-act="home"'], ['Add New Patient', 'data-act="addTemp"'], ['Find Item', 'data-act="go" data-to="find"'], ...(tab === 'my' ? [['Edit My Patients', 'data-act="go" data-to="editMy"']] : [])]),
       footer: oSide([[session.sortRoom ? 'Sort by Name' : 'Sort by Room', 'data-act="osort"']]) };
   },
 
@@ -1190,17 +1206,17 @@ const OMNI = {
     const p = PAT(session.sel);
     if (!p) return OMNI.patients();
     return { title: oTitle(`Patient: ${esc(p.last)}, ${esc(p.first)} ${p.mi}`, p), body: `<dl class="facts o-facts">
-        <dt>Patient ID:</dt><dd class="mono">${p.mrn}</dd><dt>Patient Type:</dt><dd>INP</dd><dt>Med. Rec. #:</dt><dd class="mono">${p.mrn}-4W</dd>
+        <dt>Patient ID:</dt><dd class="mono">${p.mrn}</dd><dt>Patient Type:</dt><dd>${p.temp ? 'TMP (temporary)' : 'INP'}</dd><dt>Med. Rec. #:</dt><dd class="mono">${p.mrn}-4W</dd>
         <dt>Date of Birth:</dt><dd class="mono">${fmtDob(p.dob)} (${age(p.dob)} y, ${p.sex})</dd><dt>Physician:</dt><dd>${esc(p.provider)}</dd><dt>Area:</dt><dd>4W</dd><dt>Room:</dt><dd class="mono">${p.room}</dd><dt>Diagnosis:</dt><dd>${esc(p.dx)}</dd></dl>
         ${p.nameAlert ? '<p class="warnline">Name alert: another patient on this unit has a similar name. Verify two identifiers.</p>' : ''}`,
       hint: 'Select Remove Meds, Return Meds or Waste Meds. Verify the patient with two identifiers first.',
       left: oSide([['Previous Screen', 'data-act="go" data-to="patients"', 'back'], ['Allergy Info', 'data-act="allergyInfo"'], ['Transaction History', 'data-act="pa" data-a="past"']]),
-      footer: oSide([['Remove Meds', 'data-act="pa" data-a="remove"', 'go'], ['Return Meds', 'data-act="pa" data-a="return"'], ['Waste Meds', 'data-act="pa" data-a="waste"']]) };
+      footer: oSide([['Remove Meds', 'data-act="pa" data-a="remove"', 'go'], ['Remove Kits', 'data-act="pa" data-a="kits"'], ['Return Meds', 'data-act="pa" data-a="return"'], ['Waste Meds', 'data-act="pa" data-a="waste"']]) };
   },
 
   profile() {
     const p = PAT(session.sel), cart = session.cart, tab = session.tab;
-    const inCart = key => cart.find(c => c.key === key);
+    const inCart = key => { const l = cart.filter(c => c.key === key || c.group === key); return l.length ? { qty: l.reduce((n, c) => n + c.qty, 0) } : null; };
     const row = ({ key, act, id, medId, line2, right, dim, icons = '' }) => {
       const c = inCart(key);
       return `<div class="orow med${c ? ' sel' : ''}${dim ? ' dim' : ''}" data-filterable="${esc(F[medId].name + ' ' + F[medId].brand)}">
@@ -1208,7 +1224,7 @@ const OMNI = {
         <button type="button" class="omain" data-act="${act}" data-id="${id}"><span><b>${esc(medLabel(medId))} ${esc(medDesc(medId))}</b>${icons}<br>${line2}</span><span class="oright">${right}</span></button></div>`;
     };
     const issuedTxt = (medId, warn) => { const t = lastIssue(p.id, medId); return t ? `<span class="${warn ? 'o-red' : ''}">Issued: ${oDate(t)}</span>` : '<span class="muted">Item has not been issued</span>'; };
-    const oIcons = o => `${F[o.med].controlled ? ' <span class="chip cs" title="Witness required for waste">W</span>' : ''}${o.prn ? ' <span class="chip">PRN</span>' : ''}${o.dose == null ? ' <span class="chip">RANGE</span>' : ''}`;
+    const oIcons = o => `${F[o.med].controlled ? ' <span class="chip cs" title="Witness required for waste">W</span>' : ''}${o.prn ? ' <span class="chip">PRN</span>' : ''}${o.dose == null ? ' <span class="chip">RANGE</span>' : ''}${o.nursePrep ? ' <span class="chip np">NURSE-PREPARED</span>' : ''}`;
     let listHtml = '';
     if (tab === 'stocked') {
       listHtml = Object.keys(F).sort((a, b) => F[a].name.localeCompare(F[b].name)).map(id => row({ key: 'ov-' + id, act: 'pickStocked', id, medId: id,
@@ -1350,8 +1366,9 @@ async function omniSignIn() {
   if (user.mustChange) { const ok = await changePasswordFlow(user, true); if (!ok) { session.user = null; return go('standby'); } }
   if (undocFor(user.id).length) await info('Log-on Message', '<p><b>You Have Partial Dose Issues That Require Waste.</b></p><p class="muted">See the Partial Dose List tab, then select the patient and press Waste Meds.</p>');
   emit('signin', { user: user.id, method });
-  go('patients', { listTab: (db.myPatients[user.id] || []).length ? 'my' : 'local', sel: null });
   toast(`Logged on: ${db.users[user.id].first} ${db.users[user.id].last}`);
+  if ((db.remote || []).some(q => q.user === user.id) && await omniRemotePrompt(user.id)) return;
+  go('patients', { listTab: (db.myPatients[user.id] || []).length ? 'my' : 'local', sel: null });
 }
 
 async function omniEnroll(user) {
@@ -1395,6 +1412,7 @@ async function omniSelectStocked(medId) {
   const p = PAT(session.sel), m = F[medId];
   if (session.cart.some(c => c.key === 'ov-' + medId)) return toast('Already selected — see Display Meds to Remove.');
   const existing = p.orders.find(o => o.med === medId || F[o.med].name === m.name);
+  if (existing && existing.nursePrep) return info('Override Not Permitted', '<p>Overrides are not permitted for nurse-prepared med orders. Select the order from Active Med Orders or Scheduled Meds.</p>');
   if (existing) {
     const r = await modal({ title: 'Active Med Order Exists', body: `<p>This item is on the patient's active med orders:</p><p><b>${esc(medLabel(existing.med))}</b> ${esc(sig(existing))}</p><p class="muted">Select it from Active Med Orders so the pharmacist-verified order is used.</p>`,
       buttons: [{ label: 'Override Anyway', value: 'ov' }, { label: 'Go to Active Med Orders', value: 'go', primary: true }] });
@@ -1431,7 +1449,13 @@ async function omniRemoveItem(p, it) {
       <div class="take"><div class="take-n">${it.qty}</div><div><b>Remove ${it.qty} ${unitWord(it.med, it.qty)}</b> of ${esc(medLabel(it.med))} ${esc(medDesc(it.med))}<br><span class="muted">Intended dose: ${num(it.dose)} ${m.unit}${it.override ? ' · OVERRIDE' : ''}</span></div></div>`,
     hint: 'Follow the guiding lights. Open the drawer with the blinking green LED, open the lit bin and remove the item. Press OK when you have removed it.',
     buttons: [{ label: 'Skip Item', value: 'skip' }, { label: 'OK', value: 'ok', primary: true }] });
-  if (r.value !== 'ok') return null;
+  if (r.value !== 'ok') {
+    if (it.nursePrep) {
+      const k = await modal({ title: 'Skip Item', body: '<p>Skip this component? This results in a <b>partial issue</b> of the nurse-prepared med order. Once you skip, do not remove the item even if some quantity is available.</p>', buttons: [{ label: 'No', value: 'no', primary: true }, { label: 'Yes', value: 'yes' }] });
+      if (k.value !== 'yes') return omniRemoveItem(p, it);
+    }
+    return null;
+  }
   db.inventory[it.med] -= it.qty; db.physical[it.med] -= it.qty;
   let countNote = '';
   if (m.controlled) {
@@ -1572,6 +1596,211 @@ async function omniResolve(d) {
   }
 }
 
+/* ---------- temporary patients (Pyxis: Add Temporary Patient · Omnicell: Add New Patient) ---------- */
+async function addTempPatient() {
+  const omni = isOmni();
+  const r = await modal({ title: omni ? 'New Patient Information' : 'Add Temporary Patient', body: `
+      <p class="muted">${omni ? 'Adding a patient should be rare. Check the Global List first, and enter the information carefully so the record can be reconciled.' : 'Before adding a temporary patient, search the facility to be sure the patient is not already in the system (for example, not yet transferred).'}</p>
+      <label for="tl">Last name *</label><input id="tl" autocomplete="off">
+      <label for="tf">First name</label><input id="tf" autocomplete="off">
+      <label for="tr">${omni ? 'Room *' : 'Unit / room *'}</label><input id="tr" placeholder="e.g., 424-A" autocomplete="off">
+      <label for="tid">Patient ID / MRN (if known)</label><input id="tid" autocomplete="off">
+      <label>Date of birth (complete all fields, or leave all blank)</label>
+      <div class="inline dob"><input id="tm" placeholder="MM" inputmode="numeric" maxlength="2" aria-label="Birth month"><input id="tdd" placeholder="DD" inputmode="numeric" maxlength="2" aria-label="Birth day"><input id="ty" placeholder="YYYY" inputmode="numeric" maxlength="4" aria-label="Birth year"></div>`,
+    buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: omni ? 'Add New Patient' : 'Accept', value: 'ok', primary: true }],
+    validate: (v, d) => {
+      if (!/[a-z]/i.test(d.tl)) return 'Last name is required.';
+      if (!d.tr) return omni ? 'Room is required.' : 'Unit / room is required.';
+      const parts = [d.tm, d.tdd, d.ty].filter(Boolean).length;
+      if (parts && parts < 3) return 'If entering the date of birth, all fields must be completed (month, day and year).';
+      if (parts === 3) { const dt = new Date(+d.ty, +d.tm - 1, +d.tdd); if (d.ty.length !== 4 || dt.getMonth() !== +d.tm - 1 || dt > new Date()) return 'Enter a valid date of birth.'; }
+      return null;
+    } });
+  if (r.value !== 'ok') return;
+  const d = r.data;
+  if (d.tid) {
+    const match = allPatients().find(p => p.mrn === d.tid.trim());
+    if (match) {
+      const m = await modal({ title: 'Active Patient Found', body: `<p>An active patient already matches ID <b class="mono">${esc(d.tid)}</b>:</p><p><b>${esc(patName(match))}</b> · Room ${esc(match.room)} · DOB ${fmtDob(match.dob)}</p><p class="muted">Select the active patient to avoid creating a duplicate record.</p>`,
+        buttons: [{ label: 'Create Anyway', value: 'create' }, { label: 'Select Active Patient', value: 'select', primary: true }] });
+      if (m.value === 'select') { session.sel = match.id; return go(omni ? 'pt' : 'patients', { listTab: 'all' }); }
+    }
+  }
+  const cap = x => x.trim().charAt(0).toUpperCase() + x.trim().slice(1);
+  const n = db.tempPatients.length + 1;
+  const p = { id: 'T' + n, last: cap(d.tl), first: d.tf ? cap(d.tf) : 'Unknown', mi: '', sex: 'U', dob: d.ty ? `${d.ty}-${pad(+d.tm)}-${pad(+d.tdd)}` : null,
+    mrn: d.tid ? d.tid.trim() : `TMP${String(n).padStart(4, '0')}`, room: d.tr.trim().toUpperCase(), allergies: [], allergyUnknown: true,
+    dx: 'Temporary patient — reconcile with the permanent record', provider: '—', orders: [], temp: true };
+  db.tempPatients.push(p); save();
+  emit('temp_added', { patient: p.id, last: p.last });
+  toast(`Temporary patient added: ${patName(p)}`, 'good');
+  session.sel = p.id;
+  go(omni ? 'pt' : 'patients', { listTab: omni ? 'local' : 'all' });
+}
+
+/* ---------- system kits ---------- */
+const kitList = () => KITS.map(k => `<b>${esc(k.name)}</b> — ${esc(k.use)}<br><span class="muted small">${k.items.map(i => `${i.qty} × ${esc(medLabel(i.med))} ${esc(medDesc(i.med))}`).join(' · ')}</span>`);
+async function kitsModal() {
+  const r = await modal({ title: 'System Kits', body: `<p class="muted">Kits are removed outside the patient's profile, so a profiled MedStation treats them as an <b>override</b>.</p>
+      ${KITS.map((k, i) => `<label class="radio"><input type="radio" name="kit" value="${k.id}"> <span>${kitList()[i]}</span></label>`).join('')}`,
+    buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Select Kit', value: 'ok', primary: true }], validate: (v, d) => d.kit ? null : 'Select a kit.' });
+  if (r.value === 'ok') { await pickKit(r.data.kit, true); render(); }
+}
+async function pickKit(kitId, confirmed = false) {
+  const k = KITS.find(x => x.id === kitId), p = PAT(session.sel);
+  if (session.cart.some(c => c.group === 'kit-' + kitId)) return toast('That kit is already selected.');
+  if (!confirmed) {
+    const r = await modal({ title: esc(k.name), body: `<p>${esc(k.use)}</p><ul>${k.items.map(i => `<li>${i.qty} × ${esc(medLabel(i.med))} ${esc(medDesc(i.med))}</li>`).join('')}</ul><p class="muted">Verify the kit and quantities. You will be guided to each item in turn.</p>`,
+      buttons: [{ label: 'Cancel', value: 'cancel' }, { label: 'OK', value: 'ok', primary: true }] });
+    if (r.value !== 'ok') return;
+  }
+  k.items.forEach((it, i) => session.cart.push({ med: it.med, qty: it.qty, dose: it.qty * F[it.med].strength, key: `kit-${kitId}#${i}`, group: `kit-${kitId}`, kit: kitId, orderId: null, override: true, note: `Kit: ${k.name}` }));
+  emit('kit_selected', { kit: kitId, patient: p.id });
+  toast(`${k.name} added (${k.items.length} items).`);
+}
+OMNI.kits = () => {
+  const p = PAT(session.sel), cart = session.cart, show = session.kitTab === 'display';
+  const rows = show ? cart.map(c => `<div class="orow med1"><span><b>${esc(medLabel(c.med))} ${esc(medDesc(c.med))}</b><br>${esc(c.note || '')}</span><span class="oright">Qty ${c.qty}</span></div>`).join('')
+    : KITS.map((k, i) => `<button class="orow med1${cart.some(c => c.kit === k.id) ? ' selk' : ''}" data-act="kitPick" data-id="${k.id}"><span>${kitList()[i]}</span><span class="oright">${cart.some(c => c.kit === k.id) ? '<b>Selected</b>' : ''}</span></button>`).join('');
+  return { title: oTitle(`Remove Kits for: ${esc(p.last)}, ${esc(p.first)}`, p), body: `<div class="olist">${rows || '<p class="empty-line">No items selected.</p>'}</div>`,
+    hint: 'Select the desired kit and acknowledge alerts. To add another kit, select it too. The Display Selected Items tab lists every item that will be removed.',
+    tabs: `<button type="button" class="otab${!show ? ' on' : ''}" data-act="kitTab" data-t="kits">Kits</button><button type="button" class="otab${show ? ' on' : ''}" data-act="kitTab" data-t="display">Display Selected Items</button>`,
+    left: cart.length ? oSide([['Cancel Med List', 'data-act="cancelMedList"', 'red']]) : oSide([['Previous Screen', 'data-act="go" data-to="pt"', 'back']]),
+    footer: oSide([['Remove Now', `data-act="removeMeds"${cart.length ? '' : ' disabled'}`, 'go']]) };
+};
+
+/* ---------- nurse-prepared med orders ---------- */
+async function selectNursePrep(o) {
+  const p = PAT(session.sel), np = o.nursePrep;
+  const r = await modal({ title: isOmni() ? 'Nurse-prepared Med Order' : 'Nurse-prepared Order', body: `<p><b>${esc(medLabel(o.med))}</b> ${esc(sig(o))}</p><p>${esc(np.label)}</p>
+      <h3>Component Details</h3><ul>${np.items.map(c => `<li>${c.qty} × <b>${esc(medLabel(c.med))}</b> ${esc(medDesc(c.med))} <span class="muted small">— ${esc(locText(c.med))}</span></li>`).join('')}</ul>
+      <p class="muted">Selecting this order selects every component. You cannot change the intended dose or quantity.${isOmni() ? ' Overrides are not permitted for nurse-prepared med orders.' : ''} Prepare the order per hospital policy before giving it.</p>`,
+    buttons: [{ label: 'Cancel', value: 'cancel' }, { label: 'OK', value: 'ok', primary: true }] });
+  if (r.value !== 'ok') return;
+  emit('nurseprep_selected', { order: o.id, patient: p.id });
+  np.items.forEach((c, i) => session.cart.push({ med: c.med, qty: c.qty, dose: c.qty * F[c.med].strength, key: `${o.id}#${i}`, group: o.id, orderId: o.id, nursePrep: true, override: false, note: 'Nurse-prepared component' }));
+  if (isOmni()) session.tab = 'display';
+  render();
+}
+
+/* ---------- Omnicell: pending Anywhere RN requests at log-on ---------- */
+function buildRemoteCart(q) {
+  const cart = [], bad = [];
+  q.items.forEach(it => {
+    const o = orderById(it.orderId);
+    if (!o || orderStatus(o).kind === 'future') { bad.push(`${medLabel(it.med)}: no active med order`); return; }
+    const parts = o.nursePrep ? o.nursePrep.items.map((c, i) => ({ med: c.med, qty: c.qty, dose: c.qty * F[c.med].strength, key: `${o.id}#${i}`, group: o.id, orderId: o.id, nursePrep: true, override: false, note: 'Anywhere RN request' }))
+      : [cartItem(o.med, it.dose, { orderId: o.id, override: false, note: 'Anywhere RN request' })];
+    const short = parts.find(c => db.physical[c.med] < c.qty);
+    if (short) bad.push(`${medLabel(short.med)}: insufficient quantity in this cabinet`); else cart.push(...parts);
+  });
+  return { cart, bad };
+}
+async function omniRemotePrompt(userId) {
+  for (;;) {
+    const mine = db.remote.filter(q => q.user === userId);
+    if (!mine.length) return false;
+    const r = await step({ title: 'Pending Remote Requests', body: `<div class="olist">${mine.map(q => { const pt = PAT(q.patient);
+        return `<div class="orow med1"><span><b>${esc(patName(pt))}</b> · Rm ${esc(pt.room)}<br>${q.kind === 'issue' ? 'Issue' : 'Return'}: ${q.items.map(i => esc(medLabel(i.med))).join(', ')}</span><span class="oright">Created ${oDate(q.t)}</span></div>`; }).join('')}</div>`,
+      hint: 'You have pending Anywhere RN requests. Press Issue or Return to complete them now, or Proceed with Login to handle them later.',
+      buttons: [...(mine.some(q => q.kind === 'issue') ? [{ label: 'Issue', value: 'issue', primary: true }] : []), ...(mine.some(q => q.kind === 'return') ? [{ label: 'Return', value: 'return' }] : []), { label: 'Proceed with Login', value: 'skip' }] });
+    if (r.value === 'skip') return false;
+    let list = mine.filter(q => q.kind === r.value), q = list[0];
+    if (new Set(list.map(x => x.patient)).size > 1) {
+      const pick = await step({ title: `Select Patient for Remote ${r.value === 'issue' ? 'Issue' : 'Return'}`, body: `<div class="olist">${list.map(x => { const pt = PAT(x.patient); return `<button type="button" class="orow med1" data-resolve="${x.id}" data-novalidate><span><b>${esc(patName(pt))}</b><br>${esc(pt.mrn)}</span><span class="oright">Rm#: ${esc(pt.room)}</span></button>`; }).join('')}</div>`,
+        hint: 'Select one of the patients to proceed.', buttons: [{ label: 'Proceed with Login', value: 'skip' }] });
+      if (pick.value === 'skip') return false;
+      q = list.find(x => x.id === pick.value);
+    }
+    session.sel = q.patient;
+    db.remote = db.remote.filter(x => x.id !== q.id); save();
+    emit('remote_started', { kind: q.kind, patient: q.patient });
+    if (q.kind === 'issue') {
+      const { cart, bad } = buildRemoteCart(q);
+      if (bad.length) await info('Notice of Incomplete Items', `<p>These requested items cannot be issued:</p><ul>${bad.map(b => `<li>${esc(b)}</li>`).join('')}</ul>`);
+      if (!cart.length) continue;
+      session.cart = cart;
+      await runRemoval();
+      return true;
+    }
+    for (const it of q.items) { const rem = db.removals.find(x => x.id === it.remId); if (rem && rem.qty - rem.returnedQty > 0) await omniReturnFlow(rem); }
+    return true;
+  }
+}
+
+/* ---------- Anywhere RN (remote workstation, outside the cabinet) ---------- */
+const arnEl = $('#arn');
+const arn = { user: null, patient: null, tab: 'issue', msg: '' };
+function arnRender() {
+  const u = arn.user && db.users[arn.user];
+  let body;
+  if (!u) {
+    body = `<p>Log on with the same User ID and password you use at the cabinet.</p>
+      <label for="arnid">User ID</label><input id="arnid" autocapitalize="none" spellcheck="false" autocomplete="off">
+      <label for="arnpw">Password</label><input id="arnpw" type="password" autocomplete="off">
+      <div class="arn-btns"><button class="btn primary" data-arn="login">Log On</button></div>`;
+  } else if (!arn.patient) {
+    const mine = db.myPatients[u.id] || [], pend = (db.remote || []).filter(q => q.user === u.id);
+    body = `<p>Signed on as <b>${esc(u.first)} ${esc(u.last)}</b>. Select a patient from <b>My Patients</b>.</p>
+      ${mine.length ? `<div class="arn-list">${mine.map(id => { const p = PAT(id); return p ? `<button class="arn-row" data-arn="pt" data-id="${id}"><b>${esc(patName(p))}</b><span>Rm ${esc(p.room)}</span></button>` : ''; }).join('')}</div>` : '<p class="bad">Your My Patients list is empty. Add patients at the cabinet first (My Patients tab → Edit My Patients).</p>'}
+      <h4>Pending requests</h4>${pend.length ? `<div class="arn-list">${pend.map(q => `<div class="arn-row static"><span><b>${q.kind === 'issue' ? 'Issue' : 'Return'}</b> · ${esc(patName(PAT(q.patient)))} — ${q.items.map(i => esc(medLabel(i.med))).join(', ')}</span><button class="btn small" data-arn="cancelReq" data-id="${q.id}">Cancel Request</button></div>`).join('')}</div>` : '<p class="muted">None.</p>'}
+      <div class="arn-btns"><button class="btn" data-arn="logout">Log Off</button></div>`;
+  } else {
+    const p = PAT(arn.patient);
+    const rows = arn.tab === 'issue'
+      ? p.orders.filter(o => orderStatus(o).kind !== 'future').map(o => `<label class="arn-row"><input type="checkbox" name="ri" value="${o.id}"> <span><b>${esc(medLabel(o.med))}</b> ${esc(sig(o))}${o.dose == null ? `<br>Dose to give: <input class="arn-dose" id="d_${o.id}" type="number" step="any" inputmode="decimal" placeholder="${num(o.doseMin)}–${num(o.doseMax)}"> ${F[o.med].unit}` : ''}</span></label>`).join('')
+      : db.removals.filter(r => r.patient === p.id && r.user === arn.user && r.qty - r.returnedQty > 0 && !r.wasted).map(r => `<label class="arn-row"><input type="checkbox" name="rr" value="${r.id}"> <span><b>${esc(medLabel(r.med))}</b> ${esc(medDesc(r.med))} — issued ${oDate(r.t)}, qty ${r.qty - r.returnedQty}</span></label>`).join('');
+    body = `<p><b>${esc(patName(p))}</b> · Rm ${esc(p.room)} · Allergies: ${esc(allergyText(p))}</p>
+      <div class="seg small"><button class="${arn.tab === 'issue' ? 'on' : ''}" data-arn="tab" data-t="issue">Issue Request</button><button class="${arn.tab === 'return' ? 'on' : ''}" data-arn="tab" data-t="return">Return Request</button></div>
+      <div class="arn-list">${rows || `<p class="muted">${arn.tab === 'issue' ? 'No active med orders.' : 'No open issues of yours to return.'}</p>`}</div>
+      <div class="arn-btns"><button class="btn" data-arn="back">Back</button><button class="btn primary" data-arn="create">Create ${arn.tab === 'issue' ? 'Issue' : 'Return'} Request</button></div>`;
+  }
+  arnEl.innerHTML = `<div class="arn-win" role="dialog" aria-modal="true" aria-labelledby="arnTitle"><div class="arn-bar"><b id="arnTitle">Anywhere RN</b><span>Nurses' station workstation · 4 West</span><button class="arn-x" data-arn="close" aria-label="Close Anywhere RN">×</button></div>
+    <div class="arn-body">${arn.msg ? `<p class="arn-msg">${arn.msg}</p>` : ''}${body}</div></div>`;
+  arn.msg = '';
+  const f = arnEl.querySelector('input:not([type=checkbox])'); if (f && !u) f.focus();
+}
+function arnOpen() { arnEl.hidden = false; arnRender(); }
+arnEl.addEventListener('click', e => {
+  if (e.target === arnEl) { arnEl.hidden = true; return; }
+  const b = e.target.closest('[data-arn]'); if (!b) return;
+  const a = b.dataset.arn;
+  if (a === 'close') { arnEl.hidden = true; return; }
+  if (a === 'login') {
+    const id = (arnEl.querySelector('#arnid').value || '').trim().toLowerCase(), pw = arnEl.querySelector('#arnpw').value;
+    if (!db.users[id] || db.users[id].password !== pw) arn.msg = '<span class="bad">Invalid User ID or password.</span>';
+    else if (db.users[id].mustChange) arn.msg = '<span class="bad">Log on at the cabinet first to replace your temporary password.</span>';
+    else { arn.user = id; arn.patient = null; }
+  } else if (a === 'logout') { arn.user = null; arn.patient = null; }
+  else if (a === 'pt') { arn.patient = b.dataset.id; arn.tab = 'issue'; }
+  else if (a === 'back') arn.patient = null;
+  else if (a === 'tab') arn.tab = b.dataset.t;
+  else if (a === 'cancelReq') { db.remote = db.remote.filter(q => q.id !== b.dataset.id); save(); arn.msg = 'Request cancelled.'; renderCoach(); }
+  else if (a === 'create') {
+    const picked = [...arnEl.querySelectorAll('input[type=checkbox]:checked')].map(x => x.value);
+    if (!picked.length) arn.msg = '<span class="bad">Select at least one item.</span>';
+    else if (arn.tab === 'issue') {
+      const items = [];
+      for (const oid of picked) {
+        const o = orderById(oid); let dose = o.dose;
+        if (dose == null) { dose = parseFloat(arnEl.querySelector('#d_' + oid).value); if (isNaN(dose) || dose < o.doseMin || dose > o.doseMax) { arn.msg = `<span class="bad">Enter a dose for ${esc(medLabel(o.med))} between ${num(o.doseMin)} and ${num(o.doseMax)} ${F[o.med].unit}.</span>`; return arnRender(); } }
+        items.push({ orderId: oid, med: o.med, dose });
+      }
+      db.remote.push({ id: uid(), user: arn.user, patient: arn.patient, kind: 'issue', items, t: Date.now() });
+      emit('remote_created', { patient: arn.patient, kind: 'issue', meds: items.map(i => i.med) });
+      arn.msg = 'Issue request created. Log on at the cabinet to complete it.'; arn.patient = null;
+    } else {
+      const items = picked.map(id => { const r = db.removals.find(x => x.id === id); return { remId: id, med: r.med }; });
+      db.remote.push({ id: uid(), user: arn.user, patient: arn.patient, kind: 'return', items, t: Date.now() });
+      emit('remote_created', { patient: arn.patient, kind: 'return', meds: items.map(i => i.med) });
+      arn.msg = 'Return request created. Log on at the cabinet to complete it.'; arn.patient = null;
+    }
+    save(); renderCoach();
+  }
+  arnRender();
+});
+arnEl.addEventListener('keydown', e => { if (e.key === 'Escape') arnEl.hidden = true; if (e.key === 'Enter' && e.target.id === 'arnpw') arnEl.querySelector('[data-arn="login"]').click(); });
+
 /* ---------- reports / clipboard ---------- */
 function reportText() {
   const list = db.tx.filter(t => session.reportAll || t.user === session.user).sort((a, b) => a.t - b.t);
@@ -1589,6 +1818,7 @@ function renderCoach() {
   const sc = db.scen, S = sc && scenById(sc.id);
   let html = `<div class="coach-head"><h2>Practice Coach</h2><button class="btn small ghost only-narrow" data-cact="toDevice">Back to cabinet ↑</button></div>
     <div class="dev-switch" role="radiogroup" aria-label="Cabinet type">${Object.values(DEVICES).map(d => `<button role="radio" aria-checked="${D().key === d.key}" class="${D().key === d.key ? 'on' : ''}" data-cact="device" data-dev="${d.key}"><b>${d.key === 'pyxis' ? 'Pyxis' : 'Omnicell'}</b><span>${d.key === 'omnicell' ? 'Omnicell XT · Color Touch' : 'Pyxis MedStation ES'}</span></button>`).join('')}</div>
+    ${isOmni() ? `<button class="btn small arn-open" data-cact="arn">Open Anywhere RN (nurses' station)${(db.remote || []).length ? ` · ${db.remote.length} pending` : ''}</button>` : ''}
     ${isOmni() ? '<p class="small muted dev-note"><b>Omnicell workflow</b> (Color Touch user guide): log on → patient list → select patient → <b>Remove Meds</b>, <b>Return Meds</b> or <b>Waste Meds</b>. Controlled meds use a <b>countback</b> (quantity remaining after you remove). Overrides come from the <b>Stocked Meds</b> tab. Press <b>Exit</b> to log off.</p>' : '<p class="small muted dev-note"><b>Pyxis workflow:</b> select the patient first, then choose Remove, Return, Waste or Override. Controlled meds use a <b>blind count</b> before you remove.</p>'}`;
   if (S) {
     const stepsHtml = S.steps.map((s, i) => {
@@ -1603,7 +1833,7 @@ function renderCoach() {
   } else {
     html += `<p class="coach-intro">You are in <b>free practice</b>. Explore the ${D().name}, or choose a guided scenario for step-by-step coaching and feedback.</p>`;
   }
-  html += `<details class="coach-sec" ${S && !sc.done ? '' : 'open'}><summary>Guided scenarios</summary><ul class="scen-list">${SCENARIOS.map(s => `<li><button class="scen-btn ${sc && sc.id === s.id ? 'on' : ''}" data-cact="start" data-id="${s.id}"><span class="lvl">${s.level}</span><span>${devText(s.title)}</span></button></li>`).join('')}</ul><p class="small muted">Starting a scenario resets patients, inventory and transactions (practice accounts are kept).</p></details>
+  html += `<details class="coach-sec" ${S && !sc.done ? '' : 'open'}><summary>Guided scenarios</summary><ul class="scen-list">${SCENARIOS.map(s => `<li><button class="scen-btn ${sc && sc.id === s.id ? 'on' : ''}" data-cact="start" data-id="${s.id}"><span class="lvl">${s.level}${s.device ? ' · ' + (s.device === 'omnicell' ? 'Omnicell only' : 'Pyxis only') : ''}</span><span>${devText(s.title)}</span></button></li>`).join('')}</ul><p class="small muted">Starting a scenario resets patients, inventory and transactions (practice accounts are kept).</p></details>
     <details class="coach-sec"><summary>Practice accounts</summary><ul class="small">
       <li><b>Student:</b> <code>student</code> — first sign-in password <code>123456</code></li>
       <li><b>Witness RNs:</b> <code>kjones</code> / <code>pyxis1</code> · <code>mlee</code> / <code>pyxis2</code> (both have BioID)</li>
@@ -1631,6 +1861,7 @@ coach.addEventListener('click', e => {
   if (a === 'start') startScenario(b.dataset.id);
   else if (a === 'restart') startScenario(db.scen.id);
   else if (a === 'exit') { db.scen = null; save(); renderCoach(); }
+  else if (a === 'arn') arnOpen();
   else if (a === 'device') { if (db.settings.device !== b.dataset.dev) { db.settings.device = b.dataset.dev; save(); signOutQuiet(); toast(`Switched to ${D().model}.`); } }
   else if (a === 'toDevice') $('#device').scrollIntoView({ behavior: 'smooth' });
   else if (a === 'resetPractice') { freshPractice(); db.scen = null; save(); signOutQuiet(); toast('Practice data reset.'); }

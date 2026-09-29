@@ -46,6 +46,8 @@ const FORMULARY = {
   epinephrine_inj:  { name: 'EPINEPHrine', brand: '', strength: 1, unit: 'mg', volume: 1, form: 'vial', desc: '1 mg/mL (1:1,000), 1 mL vial', route: 'IM', loc: { drawer: 2, type: 'CUBIE', pocket: 'A4' }, count: 6, override: true },
   diphenhydramine_inj: { name: 'diphenhydrAMINE', brand: 'Benadryl', strength: 50, unit: 'mg', volume: 1, form: 'vial', desc: '50 mg/mL, 1 mL vial', route: 'IV', loc: { drawer: 2, type: 'CUBIE', pocket: 'B2' }, count: 10, override: true },
   nitroglycerin_sl: { name: 'nitroglycerin SL', brand: 'Nitrostat', strength: 0.4, unit: 'mg', form: 'tab', route: 'SL', loc: { drawer: 2, type: 'CUBIE', pocket: 'B3' }, count: 25, override: true },
+  sterile_water_10: { name: 'sterile water for injection', brand: '', strength: 10, unit: 'mL', form: 'vial', desc: '10 mL vial (diluent)', route: 'IV', loc: { drawer: 5, type: 'Matrix', pocket: 12 }, count: 30, override: true, noSplit: true },
+  ns_flush:         { name: 'sodium chloride 0.9% flush', brand: '', strength: 10, unit: 'mL', form: 'syringe', desc: '10 mL prefilled flush syringe', route: 'IV', loc: { drawer: 3, type: 'Matrix', pocket: 10 }, count: 50, override: true, noSplit: true },
 };
 
 const ALLERGY_CLASSES = {
@@ -83,7 +85,8 @@ const PATIENTS = [
   { id: 'P3', last: 'Carter', first: 'Evelyn', mi: 'R', sex: 'F', dob: '1958-11-23', mrn: '4020334', room: '418-A',
     allergies: [], dx: 'Community-acquired pneumonia, type 2 diabetes', provider: 'Dr. A. Patel',
     orders: [
-      { id: 'o301', med: 'ceftriaxone_inj', dose: 1, freq: 'daily', dueIn: 15 },
+      { id: 'o301', med: 'ceftriaxone_inj', dose: 1, freq: 'daily', dueIn: 15,
+        nursePrep: { label: 'Reconstitute cefTRIAXone 1 g with 10 mL sterile water; give IV push over 1–2 minutes', items: [{ med: 'ceftriaxone_inj', qty: 1 }, { med: 'sterile_water_10', qty: 1 }] } },
       { id: 'o302', med: 'azithromycin_inj', dose: 500, freq: 'daily', dueIn: 240 },
       { id: 'o303', med: 'lispro_pen', doseMin: 0, doseMax: 10, freq: 'AC & HS per sliding scale', dueIn: 15 },
       { id: 'o304', med: 'glargine_pen', dose: 20, freq: 'at bedtime', dueIn: 720 },
@@ -143,6 +146,13 @@ const DISCREPANCY_REASONS = [
 /* Guided practice scenarios.
  * Each step has a matcher on emitted events. `patient` is the correct patient for
  * wrong-patient error checks. */
+// System kits: groups of items removed together (a kit on a profiled cabinet is treated as an override).
+const KITS = [
+  { id: 'k_hypo', name: 'Hypoglycemia Rescue Kit', use: 'Symptomatic hypoglycemia (BG < 70 mg/dL) per protocol', items: [{ med: 'dextrose50_inj', qty: 1 }, { med: 'glucagon_inj', qty: 1 }] },
+  { id: 'k_opioid', name: 'Opioid Reversal Kit', use: 'Opioid-induced respiratory depression per protocol', items: [{ med: 'naloxone_inj', qty: 2 }, { med: 'ns_flush', qty: 2 }] },
+  { id: 'k_anaphylaxis', name: 'Anaphylaxis Kit', use: 'Anaphylaxis per rapid response protocol', items: [{ med: 'epinephrine_inj', qty: 1 }, { med: 'diphenhydramine_inj', qty: 1 }, { med: 'ns_flush', qty: 2 }] },
+];
+
 const SCENARIOS = [
   { id: 's1', title: 'Sign in & build My Patients', level: 'Beginner',
     brief: 'You are starting day shift on 4 West Med-Surg. Your assignment is <b>Harold Jenkins (412-A)</b> and <b>Maria Delgado (415-B)</b>. Sign in for the first time with the temporary password from pharmacy, set a new password, and add your two patients to your <b>My Patients</b> list.',
@@ -229,6 +239,37 @@ const SCENARIOS = [
       { text: 'Waste <b>75 mcg (1.5 mL)</b> with a witness', match: e => e.type === 'waste' && e.med === 'fentanyl_inj' && Math.abs(e.amount - 75) < 0.001 },
       { text: 'From Home, open <b>Discrepancies</b> and resolve with a recount, reason and witness', hint: 'You counted correctly — the previous user miscounted. Recount, pick the matching reason, add a comment, and have your witness co-sign.', match: e => e.type === 'discrepancy_resolved' },
       { text: 'Sign out', match: e => e.type === 'signout' },
+    ] },
+  { id: 's11', title: 'Add a temporary patient', level: 'Intermediate',
+    brief: 'During an ADT downtime, an unidentified man is brought from the ED to <b>room 424-A</b>. He is not in the system yet. The provider orders <b>ondansetron 4 mg IV now</b> for active vomiting. Add a <b>temporary patient</b> (last name <b>Doe</b>, room <b>424-A</b>), then override ondansetron 4 mg for him.',
+    steps: [
+      { text: 'Sign in', match: e => e.type === 'signin' },
+      { text: 'Add a temporary patient: last name Doe, room 424-A', hint: 'Pyxis: All Available Patients → Add Temporary Patient. Omnicell: patient list → Add New Patient. Last name and room/unit are required.', match: e => e.type === 'temp_added' && /doe/i.test(e.last) },
+      { text: 'Override ondansetron 4 mg for the temporary patient', hint: 'A temporary patient has no pharmacist-verified orders, so medications come out on override. Choose an override reason.', match: e => e.type === 'removed' && e.med === 'ondansetron_inj' && e.temp },
+      { text: 'Sign out', match: e => e.type === 'signout' },
+    ] },
+  { id: 's12', title: 'Remove a system kit (hypoglycemia)', level: 'Intermediate', patient: 'P3',
+    brief: '<b>Evelyn Carter</b> is diaphoretic and confused. Point-of-care <b>blood glucose is 48 mg/dL</b> and she cannot safely swallow. Your hypoglycemia protocol directs you to remove the <b>Hypoglycemia Rescue Kit</b> (dextrose 50% and glucagon). Remove the kit for her.',
+    steps: [
+      { text: 'Open Carter and select the <b>Hypoglycemia Rescue Kit</b>', hint: 'Pyxis: Remove → System Kits. Omnicell: patient screen → Remove Kits.', match: e => e.type === 'kit_selected' && e.kit === 'k_hypo' && e.patient === 'P3' },
+      { text: 'Remove every item in the kit', hint: 'Kits on a profiled cabinet count as an override, so a reason may be required. You are guided to each item in turn.', match: e => e.type === 'kit_removed' && e.kit === 'k_hypo' },
+      { text: 'Sign out', match: e => e.type === 'signout' },
+    ] },
+  { id: 's13', title: 'Nurse-prepared med order (cefTRIAXone)', level: 'Intermediate', patient: 'P3',
+    brief: 'It is time for <b>Evelyn Carter\'s</b> 0900 <b>cefTRIAXone 1 g IV</b>. It is a <b>nurse-prepared</b> order: you remove the drug vial and the <b>10 mL sterile water</b> diluent, then reconstitute at the bedside per policy. Remove both components.',
+    steps: [
+      { text: 'Open Carter → <b>Remove</b> and select the nurse-prepared cefTRIAXone order', hint: 'Selecting the order selects every component. Review the components before you continue.', match: e => e.type === 'nurseprep_selected' && e.order === 'o301' },
+      { text: 'Remove the cefTRIAXone 1 g vial', match: e => e.type === 'removed' && e.med === 'ceftriaxone_inj' && e.patient === 'P3' },
+      { text: 'Remove the sterile water 10 mL diluent', match: e => e.type === 'removed' && e.med === 'sterile_water_10' && e.patient === 'P3' },
+      { text: 'Sign out', match: e => e.type === 'signout' },
+    ] },
+  { id: 's14', title: 'Anywhere RN remote request', level: 'Advanced', patient: 'P1', device: 'omnicell',
+    brief: 'Omnicell only. <b>Harold Jenkins</b> is nauseated. From the nurses\' station, use <b>Anywhere RN</b> to create an issue request for his PRN <b>ondansetron 4 mg IV</b> before you walk to the cabinet. Then log on at the cabinet, press <b>Issue</b> on the pending-request prompt, and remove the dose.',
+    steps: [
+      { text: 'Open <b>Anywhere RN</b> (button in this coach panel), log on, and create an issue request for Jenkins\' ondansetron', hint: 'Anywhere RN shows patients on your My Patients list. Select Jenkins, check ondansetron, then Create Issue Request.', match: e => e.type === 'remote_created' && e.patient === 'P1' && e.meds.includes('ondansetron_inj') },
+      { text: 'Log on at the cabinet and press <b>Issue</b> on the pending request', match: e => e.type === 'remote_started' && e.kind === 'issue' },
+      { text: 'Remove the ondansetron', match: e => e.type === 'removed' && e.med === 'ondansetron_inj' && e.patient === 'P1' },
+      { text: 'Press Exit to log off', match: e => e.type === 'signout' },
     ] },
 ];
 
