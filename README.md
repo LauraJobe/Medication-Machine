@@ -41,9 +41,18 @@ Switch at the top of the **Practice Coach**. Patients, medications and the scena
 | **Anywhere RN** (Omnicell) | A nurses' station window to create issue/return requests for My Patients; at log-on the cabinet shows the pending requests (Issue / Return / Proceed with Login) and a Notice of Incomplete Items when needed. |
 | **Global Find & Reports** | Locate any medication; activity report by current user or the whole device (copy or print). |
 
+## Ways to practice (Practice Coach → Mode)
+
+Same structure as the IV Pump Practice Lab:
+
+- **Practice mode: random tasks** — an endless stream of tasks drawn from the unit's patients: scheduled and PRN meds, controlled substances with blind count/countback and waste, emergency overrides, returns, and **safety checks you should refuse** (hold parameters, allergy, PRN too soon, low respiratory rate). Filter by task type. Your work is checked automatically when the removal or return finishes; a results table shows *Task needs* vs *You did*, with the waste math. **Can't give: hold and clarify**, **Show the answer** (step-by-step for the selected cabinet) and **Skip** buttons, plus a score, streak and best streak.
+- **Check-off: 5 random tasks** — one task of each type, one attempt each, no answers; ends with a percent score and a **Copy results for instructor** button.
+- **Free practice** — no checklist; the **Event history** shows everything the cabinet recorded.
+- **Guided scenarios** — 18 scenarios with a checklist and progress bar, hints revealed one at a time, safety-error detection, and a nursing **debrief**.
+
 ## Guided scenarios
 
-The **Practice Coach** panel walks through 14 scenarios with step checklists, hints, safety-error detection and a copyable result for instructors:
+The **Practice Coach** panel walks through 18 scenarios with step checklists, hints, safety-error detection and a copyable result for instructors:
 
 1. Sign in & build My Patients
 2. Remove a scheduled oral med (digoxin with apical pulse CDC)
@@ -59,20 +68,24 @@ The **Practice Coach** panel walks through 14 scenarios with step checklists, hi
 12. Remove a system kit (Hypoglycemia Rescue Kit)
 13. Nurse-prepared med order (cefTRIAXone vial + sterile water diluent)
 14. Anywhere RN remote request (Omnicell only)
+15. PRN too soon (morphine) — cancel at the last-dose warning
+16. Past-due dose (enoxaparin)
+17. Name alert: Roberta Thompson's HYDROmorphone (waste 0.8 mg)
+18. Several scheduled meds at once
 
 **Dosage-calculation challenge** (Coach → Settings) hides the calculated waste, so students must work out the amount and the volume (amount ÷ concentration) themselves.
 
 ## Practice accounts
 
+The user ID and password are printed under each box on the sign-in screens, so there is nothing to remember and nothing to reset.
+
 | Role | User ID | Password |
 | --- | --- | --- |
-| Student | `student` | `123456` (temporary; changed at first sign-in) |
+| Student | `student` | `nurse1` |
 | Witness RN | `kjones` | `pyxis1` |
 | Witness RN | `mlee` | `pyxis2` |
 
-Students can also select **Create Practice User** to get their own ID (first initial + last name, e.g. `jsmith`, temporary password `123456`).
-
-Progress is saved in the student's own browser (localStorage). **Coach → Settings → Reset** clears it.
+Progress (score, streak, scenario results) is saved in the student's own browser. **Coach → Settings → Reset** clears it.
 
 ## Running it
 

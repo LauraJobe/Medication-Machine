@@ -114,9 +114,9 @@ const PATIENTS = [
     ] },
 ];
 
-// Practice accounts. The student account starts with the pharmacy-issued temporary password.
+// Practice accounts. Credentials are shown on the sign-in screens and never change.
 const USERS = {
-  student: { id: 'student', first: 'Nursing', last: 'Student', title: 'SN', password: '123456', mustChange: true },
+  student: { id: 'student', first: 'Nursing', last: 'Student', title: 'SN', password: 'nurse1' },
   kjones:  { id: 'kjones',  first: 'Kelly',   last: 'Jones',   title: 'RN', password: 'pyxis1', witness: true, bioid: true },
   mlee:    { id: 'mlee',    first: 'Marcus',  last: 'Lee',     title: 'RN', password: 'pyxis2', witness: true, bioid: true },
 };
@@ -155,9 +155,9 @@ const KITS = [
 
 const SCENARIOS = [
   { id: 's1', title: 'Sign in & build My Patients', level: 'Beginner',
-    brief: 'You are starting day shift on 4 West Med-Surg. Your assignment is <b>Harold Jenkins (412-A)</b> and <b>Maria Delgado (415-B)</b>. Sign in for the first time with the temporary password from pharmacy, set a new password, and add your two patients to your <b>My Patients</b> list.',
+    brief: 'You are starting day shift on 4 West Med-Surg. Your assignment is <b>Harold Jenkins (412-A)</b> and <b>Maria Delgado (415-B)</b>. Sign in and add your two patients to your <b>My Patients</b> list.',
     steps: [
-      { text: 'Sign in as <code>student</code> (temporary password <code>123456</code>) and create a new password', hint: 'Tap the screen, enter User ID student, then password 123456. You will be asked to change it (6–8 letters/numbers).', match: e => e.type === 'signin' },
+      { text: 'Sign in with user ID <code>student</code> and password <code>nurse1</code>', hint: 'Tap the screen. The user ID and password are shown under each box.', match: e => e.type === 'signin' },
       { text: 'Open <b>My Patients</b> and add Jenkins and Delgado, then Accept', hint: 'Home → My Patients → Edit. Tap each patient on the left to add them. Tap Accept.', match: e => e.type === 'mypatients_saved' && e.ids.includes('P1') && e.ids.includes('P2') },
       { text: 'Sign out of the MedStation', hint: 'Always sign out when you walk away — use Sign Out in the top-right corner.', match: e => e.type === 'signout' },
     ] },
@@ -271,6 +271,37 @@ const SCENARIOS = [
       { text: 'Remove the ondansetron', match: e => e.type === 'removed' && e.med === 'ondansetron_inj' && e.patient === 'P1' },
       { text: 'Press Exit to log off', match: e => e.type === 'signout' },
     ] },
+  { id: 's15', title: 'PRN too soon (morphine)', level: 'Intermediate', patient: 'P1',
+    seed: { removals: [{ patient: 'P1', med: 'morphine_inj', orderId: 'o107', dose: 2, minsAgo: 90 }] },
+    brief: '<b>Harold Jenkins</b> asks for more pain medicine. Pain 6/10, RR 16. His order is <b>morphine 2 mg IV q4h PRN severe pain</b>. Go to remove it, and respond to what the cabinet tells you about the last dose.',
+    steps: [
+      { text: 'Open Jenkins → <b>Remove</b> and select morphine', match: e => e.type === 'prn_alert' && e.med === 'morphine_inj' },
+      { text: 'Recognize the dose is not due yet and <b>cancel</b>', hint: 'The last dose was removed 90 minutes ago; the order is every 4 hours. Cancel, reassess, and ask the provider about other pain measures.', match: e => e.type === 'prn_hold' && e.med === 'morphine_inj' },
+      { text: 'Sign out', match: e => e.type === 'signout' },
+    ],
+    errorRules: [{ match: e => e.type === 'removed' && e.med === 'morphine_inj', msg: 'Removed morphine before the q4h PRN interval had passed.' }] },
+  { id: 's16', title: 'Past-due dose (enoxaparin)', level: 'Beginner', patient: 'P2',
+    brief: '<b>Maria Delgado\'s</b> scheduled <b>enoxaparin 40 mg subcut daily</b> is past due — look for the orange bar on the patient list. Remove it now so it can be given, and plan to document the late administration.',
+    steps: [
+      { text: 'Find the past-due patient (orange bar) and open <b>Remove</b>', hint: 'Past-due orders show an orange bar and orange count on the patient list.', match: e => e.type === 'patient_action' && e.patient === 'P2' && e.action === 'remove' },
+      { text: 'Remove enoxaparin 40 mg (1 syringe)', match: e => e.type === 'removed' && e.med === 'enoxaparin_40' && e.patient === 'P2' },
+      { text: 'Sign out', match: e => e.type === 'signout' },
+    ] },
+  { id: 's17', title: 'Name alert: Roberta Thompson\'s HYDROmorphone', level: 'Intermediate', patient: 'P5',
+    brief: '<b>Roberta Thompson (406-B)</b>, 81, hip fracture, pain 7/10, RR 16. Order: <b>HYDROmorphone 0.2 mg IV q3h PRN</b>. Stock is <b>1 mg/1 mL</b>. There is also a Robert Thompson on the unit. Remove the dose for the right patient and waste the rest.',
+    steps: [
+      { text: 'Select <b>Roberta</b> Thompson (406-B, DOB 01/30/1945) and open <b>Remove</b>', hint: 'Use two identifiers: name plus DOB or MRN.', match: e => e.type === 'patient_action' && e.patient === 'P5' && e.action === 'remove' },
+      { text: 'Remove 1 Carpuject of HYDROmorphone', match: e => e.type === 'removed' && e.med === 'hydromorphone_inj' && e.patient === 'P5' },
+      { text: 'Waste <b>0.8 mg (0.8 mL)</b> with a witness', hint: '1 mg removed − 0.2 mg dose = 0.8 mg. At 1 mg/mL that is 0.8 mL.', match: e => e.type === 'waste' && e.med === 'hydromorphone_inj' && Math.abs(e.amount - 0.8) < 0.001 },
+      { text: 'Sign out', match: e => e.type === 'signout' },
+    ] },
+  { id: 's18', title: 'Several scheduled meds at once', level: 'Beginner', patient: 'P4',
+    brief: 'It is time for <b>Robert Thompson\'s</b> 0900 medications: <b>ceFAZolin 2 g IV</b>, <b>enoxaparin 30 mg subcut</b> and <b>acetaminophen 650 mg PO</b>. Select all three, then remove them in one transaction.',
+    steps: [
+      { text: 'Open Robert Thompson → <b>Remove</b>', match: e => e.type === 'patient_action' && e.patient === 'P4' && e.action === 'remove' },
+      { text: 'Select all three due medications, then remove them together', hint: 'Tap each medication so it appears in the selected list before you start removing.', match: e => e.type === 'txn_done' && e.patient === 'P4' && ['cefazolin_inj', 'enoxaparin_30', 'apap_tab'].every(m => e.meds.includes(m)) },
+      { text: 'Sign out', match: e => e.type === 'signout' },
+    ] },
 ];
 
 /* Cabinet profiles. Both are patient-first. The Omnicell profile follows the Omnicell
@@ -296,3 +327,25 @@ const DEVICES = {
 const OMNI_OVERRIDE_REASONS = ['Emergency Situation', 'MD Order', 'Patient Condition', 'Pharmacy Not Available'];
 const OMNI_WASTE_REASONS = ['Partial dose — remainder of package', 'Patient refused after preparation', 'Dropped / contaminated', 'Order changed or discontinued'];
 const OMNI_RESOLVE_REASONS = ['Miscount at countback (my error)', 'Previous user miscount — bin level corrected by cycle count', 'Removed more or less than indicated on screen (verified on MAR)', 'Item found in wrong bin or return bin', 'Unable to resolve — incident report filed, charge nurse notified'];
+
+// Debrief shown when a guided scenario is finished (or on request).
+const DEBRIEFS = {
+  s1: 'Your My Patients list limits the screen to your assignment, which cuts down on wrong-patient selections. Never share a user ID or sign in for someone else, and always sign out when you walk away — every transaction is recorded under your name.',
+  s2: 'Digoxin requires an apical pulse counted for a full minute; hold for a pulse below 60 and notify the provider. The Clinical Data prompt is a safety check, not a formality — enter the value you actually assessed.',
+  s3: 'Controlled substances need a blind count (Pyxis) or countback (Omnicell) and any unused portion must be wasted in front of a licensed witness. Math: 4 mg − 2 mg = 2 mg to waste; 2 mg ÷ 4 mg/mL = 0.5 mL.',
+  s4: 'For a range order you choose the dose within the range based on assessment and the titration guideline, then enter the amount you will ADMINISTER. The cabinet computes the waste: 1 mg − 0.4 mg = 0.6 mg (0.6 mL).',
+  s5: 'Override is for emergencies or when pharmacist review would delay urgent care. Naloxone reverses opioid respiratory depression; reassess RR, SpO₂ and sedation every few minutes, as naloxone can wear off before the opioid. Two patients with similar names need two identifiers.',
+  s6: 'Waste Later leaves undocumented waste that follows you until it is resolved. Resolve it as soon as a witness is available — before the end of your shift. 2 mg − 0.5 mg = 1.5 mg; 1.5 mg ÷ 2 mg/mL = 0.75 mL.',
+  s7: 'Return only unopened, intact packages. A controlled-substance return requires a witness and goes to the return bin, where pharmacy verifies it. An opened controlled medication is wasted, not returned.',
+  s8: 'An allergy alert on override is a hard stop for you: no pharmacist has screened the order. Cancel, clarify with the prescriber, and document. Pressure from a provider in the hallway is not a reason to bypass an alert.',
+  s9: 'Hold parameters (for metoprolol: HR under 60 or SBP under 100) mean the dose should not be given. Cancel the removal, notify the provider, and document the held dose with the reason on the MAR.',
+  s10: 'A discrepancy is not an accusation. Count accurately every time; if your count is right, the mismatch came from earlier. Investigate with transaction history and the MAR, correct the count, choose a reason, and resolve with a witness before the end of the shift.',
+  s11: 'Temporary patients let you give urgent medications during downtime, but they have no pharmacist-verified orders, so everything is an override. Search the facility first to avoid duplicate records, and reconcile the temporary record later.',
+  s12: 'Kits group items used together in an emergency. On a profiled cabinet a kit is an override, so give a reason. For hypoglycemia with an unsafe swallow: dextrose 50% IV (or glucagon IM if no IV), then recheck glucose in 15 minutes.',
+  s13: 'A nurse-prepared order bundles the drug and its diluent so you get both. Reconstitute exactly as directed, label the syringe, and do not substitute a different diluent. Skipping a component creates a partial issue.',
+  s14: 'Anywhere RN lets you queue issue and return requests from a workstation so the cabinet takes you straight to the items. Cancel requests you no longer need, and remember the patient must be in the cabinet\'s area.',
+  s15: 'PRN intervals are minimums. The cabinet warns you when the last removal was too recent; cancel, reassess, try non-drug measures, and call the provider if pain is uncontrolled. A second dose too early is a medication error.',
+  s16: 'Past-due scheduled doses show in orange. Give the dose as soon as possible unless it is close to the next dose, follow your late-dose policy, and document the actual time and the reason for the delay.',
+  s17: 'With similar names on the unit, always verify two identifiers before selecting the patient. For an 81-year-old, a small opioid dose (0.2 mg) is appropriate; 1 mg − 0.2 mg = 0.8 mg to waste with a witness.',
+  s18: 'Select every due medication for a patient before you start removing: the cabinet then guides you drawer to drawer in one transaction, which saves time and reduces the chance of forgetting a dose.',
+};

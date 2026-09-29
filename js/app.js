@@ -57,8 +57,6 @@ const OMNI_TEXT = [
   [/All Available Patients/g, 'Local List'], [/<b>blind count<\/b>/g, '<b>countback</b>'], [/blind count/gi, 'countback'],
   [/MiniDrawer pocket/g, 'FlexBin'], [/MiniDrawer/g, 'FlexBin'], [/the pocket/g, 'the bin'],
   [/<b>Waste Now<\/b>/g, '<b>Waste Partial Dose</b>'], [/Waste Now/g, 'Waste Partial Dose'], [/<b>Waste Later<\/b>/g, '<b>Close Bin</b> without wasting'], [/Waste Later/g, 'Close Bin without wasting'],
-  [/6–8 letters\/numbers/g, '6–18 characters using 3 of: lowercase, UPPERCASE, number, symbol — e.g., Nurse#2026'],
-  [/Tap the screen, enter User ID student, then password 123456\./g, 'Tap the screen, enter User ID student, press Enter, then password 123456.'],
   [/Sign out of the MedStation/g, 'Press Exit to log off'], [/Sign out/g, 'Press Exit to log off'], [/sign out/g, 'press Exit to log off'], [/Sign in/g, 'Log on'], [/sign in/g, 'log on'],
   [/MedStation/g, 'cabinet'],
 ];
@@ -83,16 +81,21 @@ db = load();
 // Keep the simulated shift current if the student comes back another day.
 if (!db.settings.device) db.settings.device = 'pyxis';
 if (!db.tempPatients) db.tempPatients = [];
+// Practice passwords never change: always restore the published ones.
+for (const [id, u] of Object.entries(USERS)) db.users[id] = { ...(db.users[id] || u), password: u.password, mustChange: false };
 if (!db.remote) db.remote = [];
 if (Date.now() - db.base > 10 * HOUR) { db.base = Date.now(); db.orders = {}; }
 
 const session = { user: null, screen: 'standby', listTab: 'my', sel: null, mode: 'remove', tab: 'due', cart: [], reportAll: false };
 
 /* ---------- scenario engine ---------- */
+const hist = [];   // cabinet event history shown in the coach
 function emit(type, data = {}) {
   const e = { type, ...data };
-  const sc = db.scen;
-  if (!sc || sc.done) return;
+  if (!['cdc_shown', 'txn_done', 'prn_alert'].includes(type)) { hist.unshift({ t: Date.now(), e }); hist.length = Math.min(hist.length, 60); }
+  practiceEvent(e);
+  const sc = db.mode === 'scen' ? db.scen : null;
+  if (!sc || sc.done) { renderCoachSoon(); return; }
   const S = scenById(sc.id);
   const addErr = msg => { if (!sc.errors.includes(msg)) sc.errors.push(msg); };
   if (S.patient && e.type === 'removed' && e.patient !== S.patient) addErr(`Removed ${medLabel(e.med)} for the wrong patient (${patName(PAT(e.patient))}).`);
@@ -117,10 +120,12 @@ function startScenario(id) {
   const S = scenById(id);
   if (S.device && db.settings.device !== S.device) { db.settings.device = S.device; toast(`This scenario uses the ${DEVICES[S.device].model} cabinet — switched for you.`); }
   freshPractice();
-  if (id === 's1') Object.assign(db.users.student, { password: '123456', mustChange: true, bioid: false, deviceCred: null, bioPrompted: false });
+  if (id === 's1') Object.assign(db.users.student, { bioid: false, deviceCred: null });
   // Later scenarios assume the student already has My Patients set up.
   if (id !== 's1') db.myPatients.student = ['P1', 'P2', 'P3', 'P4'];
   db.scen = { id, step: 0, missed: [], errors: [], start: Date.now(), done: false };
+  db.mode = 'scen'; session.hintsShown = 0; session.showDebrief = false;
+  ((S.seed && S.seed.removals) || []).forEach(x => seedRemoval(x));
   save();
   cancelFlows();
   session.user = null; session.sel = null; session.cart = [];
@@ -561,7 +566,6 @@ const SCREENS = {
   prefs() {
     const u = db.users[session.user];
     return { title: T('prefs'), body: `<div class="prefs">
-      <div class="pref"><div><b>Password</b><span class="muted">Passwords are 6–8 letters or numbers. Change it every 3 months.</span></div><button class="btn" data-act="changePw">Change Password</button></div>
       <div class="pref"><div><b>BioID fingerprint</b><span class="muted">${u.bioid ? 'Registered.' : 'Not registered.'} Re-register if you injure the finger you enrolled.</span></div><button class="btn" data-act="regBio">${u.bioid ? 'Change BioID' : 'Register BioID'}</button></div>
       <div class="pref"><div><b>This device's fingerprint / Face ID</b><span class="muted">${u.deviceCred ? 'Linked on this device.' : deviceBioOk ? 'Available on this device.' : 'Not available in this browser. Use the simulated BioID scanner.'}</span></div>
         ${u.deviceCred ? '<button class="btn" data-act="unlinkDevice">Unlink</button>' : `<button class="btn" data-act="linkDevice"${deviceBioOk ? '' : ' disabled'}>Link Device</button>`}</div>
@@ -626,7 +630,6 @@ const ACT = {
   report: ds => { session.reportAll = ds.all === '1'; render(); },
   print: () => window.print(),
   copyReport: () => copyText(reportText()),
-  changePw: () => changePasswordFlow(db.users[session.user], false).then(ok => { if (ok) toast('Password changed.', 'good'); go('prefs'); }),
   regBio: () => registerBioFlow(db.users[session.user]).then(() => go('prefs')),
   linkDevice: async () => { await linkDevice(db.users[session.user]); go('prefs'); },
   unlinkDevice: () => { db.users[session.user].deviceCred = null; save(); toast('Device biometrics unlinked.'); go('prefs'); },
@@ -658,24 +661,18 @@ async function patientAction(action, tab) {
 }
 
 /* ---------- sign in ---------- */
-function credHint() {
-  const s = db.users.student;
-  return `<details class="cred-hint"><summary>Practice sign-in help</summary><ul>
-    <li>Student: <code>student</code> / ${s.mustChange ? '<code>123456</code> (temporary — you will set a new one)' : 'the password you created'}</li>
-    <li>Witnesses: <code>kjones</code> / <code>pyxis1</code> · <code>mlee</code> / <code>pyxis2</code></li>
-    <li>Your own ID: first initial + last name (e.g., <code>jsmith</code>) via <b>Create Practice User</b></li></ul></details>`;
-}
+// Practice credentials are shown right under each box (nothing needs to be remembered).
+const cred = (label, value) => `<p class="cred-under">${label}: <b class="mono">${esc(value)}</b></p>`;
 
 async function signInFlow() {
   let user;
   for (;;) {
     const r = await step({ title: 'Sign In', body: `<div class="signin">
-        <label for="uid">User ID</label><input id="uid" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="e.g., student">
-        <p class="muted">Enter your User ID, then sign in with BioID (fingerprint) or your password.</p>${credHint()}</div>`,
-      buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Create Practice User', value: 'create', novalidate: true }, { label: 'Next', value: 'next', primary: true }],
-      validate: (v, d) => !d.uid ? 'Enter your User ID.' : !db.users[d.uid.toLowerCase()] ? `User ID "${d.uid}" was not found. Check the spelling or create a practice user.` : null });
+        <label for="uid">User ID</label><input id="uid" autocomplete="off" autocapitalize="none" spellcheck="false">
+        ${cred('Your user ID', 'student')}</div>`,
+      buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Next', value: 'next', primary: true }],
+      validate: (v, d) => !d.uid ? 'Enter your User ID.' : !db.users[d.uid.toLowerCase()] ? `User ID "${d.uid}" was not found. Type the user ID shown under the box.` : null });
     if (r.value === 'cancel') return go('standby');
-    if (r.value === 'create') { await createUserFlow(); continue; }
     user = db.users[r.data.uid.toLowerCase()];
     break;
   }
@@ -688,12 +685,6 @@ async function signInFlow() {
     method = 'password';
   }
   session.user = user.id; session.loginMethod = method;
-  if (user.mustChange) { const ok = await changePasswordFlow(user, true); if (!ok) { session.user = null; return go('standby'); } }
-  if (!user.bioid && !user.bioPrompted) {
-    user.bioPrompted = true; save();
-    const r = await modal({ title: 'Register BioID?', body: '<p>Your BioID is not on record. Registering your fingerprint lets you sign in faster and is harder to compromise than a password.</p><p class="muted">You can do this later from User Preferences.</p>', buttons: [{ label: 'Not Now', value: 'no' }, { label: 'Register', value: 'yes', primary: true }] });
-    if (r.value === 'yes') await registerBioFlow(user);
-  }
   emit('signin', { user: user.id, method });
   go('home');
   toast(`Signed in as ${userName(user.id)}`);
@@ -702,7 +693,8 @@ async function signInFlow() {
 async function passwordLogin(user) {
   let tries = 0;
   const r = await step({ title: 'Sign In', body: `<div class="signin"><p>User ID <b class="mono">${esc(user.id)}</b></p>
-      <label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password">${credHint()}</div>`,
+      <label for="pw">Password</label><input id="pw" type="password" autocomplete="off">
+      ${cred('Your password', user.password)}</div>`,
     buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Sign In', value: 'ok', primary: true }],
     validate: (v, d) => { if (d.pw !== user.password) { tries++; return tries >= 3 ? 'Incorrect password again. In a real facility, repeated failures lock your account — contact pharmacy for a reset.' : 'Incorrect password. Passwords are case-sensitive.'; } return null; } });
   return r.value === 'ok';
@@ -728,44 +720,6 @@ async function bioLogin(user) {
       msg = `<span class="bad">Unable to verify your fingerprint (attempt ${fails} of 3).</span> Lift your finger, then cover the lens completely and hold still until the scan finishes.`;
     }
   }
-}
-
-function passwordProblem(user, np) {
-  if (!isOmni()) return /^[A-Za-z0-9]{6,8}$/.test(np) ? null : 'New password must be 6–8 letters or numbers.';
-  if (np.length < 6 || np.length > 18) return 'Passwords must be 6 to 18 characters.';
-  if (/^\s|\s$/.test(np)) return 'Spaces are not allowed as the first or last character.';
-  const kinds = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9\s]/].filter(r => r.test(np)).length;
-  if (kinds < 3) return 'Strong password required: use 3 of the 4 elements — lowercase, UPPERCASE, number, special character.';
-  if ([user.first, user.last, user.id].some(n => n && n.length >= 3 && np.toLowerCase().includes(n.toLowerCase()))) return 'Passwords should not contain your name or User ID.';
-  return null;
-}
-async function changePasswordFlow(user, forced) {
-  const r = await step({ title: forced ? 'Create a New Password' : isOmni() ? 'Change Your Password' : 'Change Password', body: `<div class="signin">
-      ${forced ? '<p>This is your first sign-in. Replace the temporary password from pharmacy with your own.</p>' : ''}
-      <label for="cur">Current password</label><input id="cur" type="password" autocomplete="current-password">
-      <label for="np">New password</label><input id="np" type="password" autocomplete="new-password" maxlength="${isOmni() ? 18 : 8}">
-      <label for="np2">Confirm new password</label><input id="np2" type="password" autocomplete="new-password" maxlength="${isOmni() ? 18 : 8}">
-      <p class="muted">${isOmni() ? 'Strong password: 6–18 characters using 3 of 4 elements (lowercase, UPPERCASE, number, special character). Do not use your name or common words.' : '6–8 letters or numbers.'} Never share your password or sign in for someone else.</p></div>`,
-    ...(isOmni() ? { hint: 'Enter your old password, then the new password twice. Passwords are case sensitive.', left: '' } : {}),
-    buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Accept', value: 'ok', primary: true }],
-    validate: (v, d) => d.cur !== user.password ? 'Current password is incorrect.' : passwordProblem(user, d.np) ? passwordProblem(user, d.np) : d.np === user.password ? 'Choose a password different from the current one.' : d.np !== d.np2 ? 'The new passwords do not match.' : null });
-  if (r.value !== 'ok') return false;
-  user.password = r.data.np; user.mustChange = false; save();
-  return true;
-}
-
-async function createUserFlow() {
-  const r = await modal({ title: 'Create Practice User', body: `<p class="muted">Your User ID will be your first initial plus the first 9 letters of your last name.</p>
-      <label for="fn">First name</label><input id="fn" autocomplete="given-name"><label for="ln">Last name</label><input id="ln" autocomplete="family-name">`,
-    buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Create', value: 'ok', primary: true }],
-    validate: (v, d) => (!/[a-z]/i.test(d.fn) || !/[a-z]/i.test(d.ln)) ? 'Enter your first and last name.' : null });
-  if (r.value !== 'ok') return;
-  const base = (r.data.fn.replace(/[^a-z]/gi, '')[0] + r.data.ln.replace(/[^a-z]/gi, '').slice(0, 9)).toLowerCase();
-  let id = base, n = 2; while (db.users[id]) id = base + n++;
-  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
-  db.users[id] = { id, first: cap(r.data.fn), last: cap(r.data.ln), title: 'SN', password: '123456', mustChange: true };
-  save();
-  await info('Practice User Created', `<p>User ID: <b class="mono big">${id}</b></p><p>Temporary password: <b class="mono">123456</b></p><p class="muted">You will create your own password the first time you sign in.</p>`);
 }
 
 async function registerBioFlow(user) {
@@ -802,9 +756,9 @@ async function linkDevice(user) {
 async function witnessFlow(purpose) {
   let r;
   for (;;) {
-    r = await modal({ title: 'Witness Required', body: `<p>${purpose}</p><p class="muted">The witness signs in with their own credentials and must watch the entire waste or return. Practice witnesses: <code>kjones</code>/<code>pyxis1</code>, <code>mlee</code>/<code>pyxis2</code>.</p>
-        <label for="wid">Witness User ID</label><input id="wid" autocapitalize="none" spellcheck="false" autocomplete="off">
-        <label for="wpw">Witness password</label><input id="wpw" type="password" autocomplete="off">`,
+    r = await modal({ title: 'Witness Required', body: `<p>${purpose}</p><p class="muted">The witness signs in with their own credentials and must watch the entire waste or return.</p>
+        <label for="wid">Witness User ID</label><input id="wid" autocapitalize="none" spellcheck="false" autocomplete="off">${cred('Witness user ID', 'kjones')}
+        <label for="wpw">Witness password</label><input id="wpw" type="password" autocomplete="off">${cred('Witness password', 'pyxis1')}`,
       buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Witness BioID', value: 'bio' }, { label: 'Accept', value: 'ok', primary: true }],
       validate: (v, d) => {
         const id = (d.wid || '').toLowerCase();
@@ -874,9 +828,14 @@ async function selectOrder(oid) {
   const o = orderById(oid), p = PAT(session.sel), m = F[o.med];
   if (session.cart.some(c => c.orderId === oid)) return toast(`Already in ${T('selected')}.`);
   const s = orderStatus(o);
-  const cont = async (title, body) => (await modal({ title, cls: 'alert', body, buttons: [{ label: isOmni() ? 'OK' : 'Continue', value: 'go' }, { label: 'Cancel', value: 'no', primary: true }] })).value === 'go';
+  const cont = async (title, body) => {
+    emit('prn_alert', { med: o.med, patient: p.id });
+    const go = (await modal({ title, cls: 'alert', body, buttons: [{ label: isOmni() ? 'OK' : 'Continue', value: 'go' }, { label: 'Cancel', value: 'no', primary: true }] })).value === 'go';
+    if (!go) emit('prn_hold', { med: o.med, patient: p.id });
+    return go;
+  };
   if (isOmni()) {
-    const h = freqHours(o.freq), last = lastIssue(p.id, o.med);
+    const h = freqHours(o.freq), last = s.kind === 'given' ? s.at : s.last;
     if (last && (s.kind === 'given' || (s.kind === 'prn' && h && Date.now() - last < h * HOUR)) &&
       !await cont('<span class="alert-title">Last Issued Alert</span>', `<p>This item was recently issued on <b>${oDate(last)}</b>. Do you want to continue?</p><p class="muted">Order: ${esc(o.freq)}${o.prn ? ' PRN' : ''}. Check the MAR before continuing.</p>`)) return;
   } else {
@@ -939,6 +898,7 @@ async function runRemoval() {
     const res = isOmni() ? await omniRemoveItem(p, it) : await removeItem(p, it, reason);
     if (res) done.push({ ...res, key: it.key });
   }
+  emit('txn_done', { patient: p.id, meds: done.map(d => d.med) });
   [...new Set(items.filter(i => i.kit).map(i => i.kit))].forEach(k => {
     if (items.filter(i => i.kit === k).every(i => done.some(d => d.key === i.key))) emit('kit_removed', { kit: k, patient: p.id });
   });
@@ -1308,7 +1268,6 @@ const OMNI = {
   prefs() {
     const u = db.users[session.user], viaFinger = session.loginMethod === 'bioid' || session.loginMethod === 'device';
     return { title: 'User Menus', body: `<div class="prefs">
-      <div class="pref"><div><b>Change Your Password</b><span class="muted">6–18 characters with 3 of 4: lowercase, UPPERCASE, number, special character. Do not use your name or common words.</span></div><button class="btn" data-act="changePw">Change Your Password</button></div>
       ${u.bioid ? `<div class="pref"><div><b>Re-enroll Your Fingerprint</b><span class="muted">${viaFinger ? 'Primary and alternate fingers. Clean the scanner first.' : 'Only available when you log on by scanning your enrolled fingerprint.'}</span></div><button class="btn" data-act="regBio"${viaFinger ? '' : ' disabled'}>Re-enroll Your Fingerprint</button></div>`
         : `<div class="pref"><div><b>Enroll Fingerprint (practice registrar)</b><span class="muted">At a facility, a designated fingerprint registrar enrolls you. Here you can practice the enrollment yourself.</span></div><button class="btn" data-act="regBio">Enroll Fingerprint</button></div>`}
       <div class="pref"><div><b>This device's fingerprint / Face ID</b><span class="muted">${u.deviceCred ? 'Linked on this device.' : deviceBioOk ? 'Available on this device.' : 'Not available in this browser. Use the simulated scanner.'}</span></div>
@@ -1323,9 +1282,10 @@ const OMNI = {
 function oLogonBody(uid, stage, msg, err) {
   return `<div class="o-logon"><div class="o-brand">Omnicell XT · Color Touch</div><p class="o-welcome">Welcome! Please Enter:</p>
     <div class="o-logon-grid"><div>
-      <label for="uid">User ID:</label><input id="uid" autocomplete="username" autocapitalize="none" spellcheck="false" value="${esc(uid)}" class="${err === 'uid' ? 'hl' : ''}"${stage === 'pw' ? ' readonly' : ''}>
-      ${stage === 'pw' ? '<label for="pw">Password:</label><input id="pw" type="password" autocomplete="current-password">' : ''}
-    </div>${scannerHtml(msg)}</div>${credHint()}</div>`;
+      <label for="uid">User ID:</label><input id="uid" autocomplete="off" autocapitalize="none" spellcheck="false" value="${esc(uid)}" class="${err === 'uid' ? 'hl' : ''}"${stage === 'pw' ? ' readonly' : ''}>
+      ${cred('Your user ID', 'student')}
+      ${stage === 'pw' ? `<label for="pw">Password:</label><input id="pw" type="password" autocomplete="off">${cred('Your password', (db.users[uid] || {}).password || 'nurse1')}` : ''}
+    </div>${scannerHtml(msg)}</div></div>`;
 }
 async function omniSignIn() {
   let uid = '', stage = 'id', fails = 0, err = '';
@@ -1335,12 +1295,11 @@ async function omniSignIn() {
     const r = await step({ title: `${D().station} · MED1<span class="o-sub">4 West Medical-Surgical</span>`, body: oLogonBody(uid, stage, msg, err),
       hint: 'Please enter your user ID and Password if required. Press the Enter key when you are finished typing a user ID or password. You may scan your fingerprint at any time.',
       tabs: oMenu('', false), left: stage === 'pw' ? oSide([['Previous Screen', 'data-resolve="back" data-novalidate', 'back']]) : oSide([['Cancel', 'data-resolve="cancel" data-novalidate', 'back']]),
-      buttons: [{ label: 'Create Practice User', value: 'create', novalidate: true }, { label: 'Enter', value: 'enter', primary: true }] });
+      buttons: [{ label: 'Enter', value: 'enter', primary: true }] });
     err = '';
     const typed = (r.data.uid || '').toLowerCase();
     if (r.value === 'cancel') return go('standby');
     if (r.value === 'back') { stage = 'id'; continue; }
-    if (r.value === 'create') { await createUserFlow(); continue; }
     if (r.value === 'disc') { await info('Discrepancy', '<p>An open discrepancy exists on this cabinet. Log on, then press <b>Main Menu → Resolve Discrep</b>.</p>'); continue; }
     if (r.value === 'scan-ok') {
       const cand = typed && db.users[typed] ? db.users[typed] : (!typed ? (db.shortList || []).map(id => db.users[id]).find(x => x && x.bioid) : null);
@@ -1363,7 +1322,6 @@ async function omniSignIn() {
   }
   session.user = user.id; session.loginMethod = method;
   db.shortList = [user.id, ...(db.shortList || []).filter(x => x !== user.id)].slice(0, 8);
-  if (user.mustChange) { const ok = await changePasswordFlow(user, true); if (!ok) { session.user = null; return go('standby'); } }
   if (undocFor(user.id).length) await info('Log-on Message', '<p><b>You Have Partial Dose Issues That Require Waste.</b></p><p class="muted">See the Partial Dose List tab, then select the patient and press Waste Meds.</p>');
   emit('signin', { user: user.id, method });
   toast(`Logged on: ${db.users[user.id].first} ${db.users[user.id].last}`);
@@ -1736,8 +1694,8 @@ function arnRender() {
   let body;
   if (!u) {
     body = `<p>Log on with the same User ID and password you use at the cabinet.</p>
-      <label for="arnid">User ID</label><input id="arnid" autocapitalize="none" spellcheck="false" autocomplete="off">
-      <label for="arnpw">Password</label><input id="arnpw" type="password" autocomplete="off">
+      <label for="arnid">User ID</label><input id="arnid" autocapitalize="none" spellcheck="false" autocomplete="off">${cred('Your user ID', 'student')}
+      <label for="arnpw">Password</label><input id="arnpw" type="password" autocomplete="off">${cred('Your password', 'nurse1')}
       <div class="arn-btns"><button class="btn primary" data-arn="login">Log On</button></div>`;
   } else if (!arn.patient) {
     const mine = db.myPatients[u.id] || [], pend = (db.remote || []).filter(q => q.user === u.id);
@@ -1769,7 +1727,6 @@ arnEl.addEventListener('click', e => {
   if (a === 'login') {
     const id = (arnEl.querySelector('#arnid').value || '').trim().toLowerCase(), pw = arnEl.querySelector('#arnpw').value;
     if (!db.users[id] || db.users[id].password !== pw) arn.msg = '<span class="bad">Invalid User ID or password.</span>';
-    else if (db.users[id].mustChange) arn.msg = '<span class="bad">Log on at the cabinet first to replace your temporary password.</span>';
     else { arn.user = id; arn.patient = null; }
   } else if (a === 'logout') { arn.user = null; arn.patient = null; }
   else if (a === 'pt') { arn.patient = b.dataset.id; arn.tab = 'issue'; }
@@ -1812,35 +1769,291 @@ function copyText(txt) {
   if (navigator.clipboard) navigator.clipboard.writeText(txt).then(() => toast('Copied to clipboard.', 'good'), fallback); else fallback();
 }
 
-/* ---------- practice coach ---------- */
+/* ---------- practice modes (same structure as the IV Pump Practice Lab) ----------
+ * practice: endless random tasks with a score · checkoff: 5 tasks, one attempt each
+ * free: explore with no checklist · scen: guided scenarios with hints and a debrief */
+let rcT = null;
+function renderCoachSoon() { clearTimeout(rcT); rcT = setTimeout(renderCoach, 0); }
+
+function seedRemoval({ patient, med, orderId, dose, minsAgo = 30, refused = false }) {
+  const m = F[med], q = m.noSplit ? 1 : Math.max(1, Math.ceil(dose / m.strength - 1e-9)), t = Date.now() - minsAgo * MIN;
+  const exp = m.controlled && !m.noSplit && !refused ? +(q * m.strength - dose).toFixed(4) : 0;
+  db.inventory[med] -= q; db.physical[med] -= q;
+  db.removals.push({ id: uid(), t, user: 'student', patient, med, orderId, qty: q, dose, override: false, expectedWaste: exp, wasted: exp, adminDone: !refused, returnedQty: 0, undocumented: false, witness: exp ? 'kjones' : undefined });
+  if (orderId) { const o = orderById(orderId); db.orders[orderId] = { lastRemoved: t, by: 'student', ...(o.prn ? {} : { given: t }) }; }
+  db.tx.push({ id: uid(), t, user: 'student', type: 'Remove', patient, med, amount: `${q} ${unitWord(med, q)} / dose ${num(dose)} ${m.unit}`, note: 'Earlier this shift' });
+  if (exp) db.tx.push({ id: uid(), t: t + MIN, user: 'student', type: 'Waste', patient, med, amount: amtText(med, exp), witness: 'kjones', note: 'Earlier this shift' });
+}
+
+const PCATS = { all: 'All task types', routine: 'Scheduled & PRN meds', cs: 'Controlled substances & waste', override: 'Emergency overrides', ret: 'Returns', safety: 'Safety checks (hold & clarify)' };
+const pickOne = a => a[Math.floor(Math.random() * a.length)];
+const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const ordOf = oid => { const o = orderById(oid); return { o, p: PATIENTS.find(x => x.orders.includes(o)) }; };
+const who = pid => { const p = PAT(pid); return `<b>${esc(p.first)} ${esc(p.last)}</b> (${esc(p.room)})`; };
+
+const TASKGEN = {
+  routine: [
+    () => { const oid = pickOne(['o101', 'o102', 'o103', 'o104', 'o105', 'o204', 'o205', 'o206', 'o403', 'o404', 'o405', 'o502', 'o504']), { o, p } = ordOf(oid);
+      const cdc = {}; let a = '';
+      if (o.med === 'digoxin_tab') { cdc.hr = rint(64, 90); a = ` Apical pulse <b>${cdc.hr}</b> bpm.`; }
+      if (o.med === 'metoprolol_tab') { cdc.hr = rint(66, 92); cdc.sbp = rint(112, 148); a = ` HR <b>${cdc.hr}</b>, BP <b>${cdc.sbp}/${rint(64, 86)}</b>.`; }
+      return { cat: 'routine', kind: 'remove', patient: p.id, med: o.med, orderId: oid, dose: o.dose, cdc, tab: 'due',
+        text: `It is time for ${who(p.id)}'s scheduled <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>.${a} Remove the dose.` }; },
+    () => { const c = pickOne([{ oid: 'o106', why: 'a temperature of 38.6 °C and a headache' }, { oid: 'o108', why: 'nausea and has vomited twice' }, { oid: 'o203', why: 'new nausea after lunch' }, { oid: 'o306', why: 'expiratory wheezes and SpO₂ 92%' }, { oid: 'o307', why: 'mild pain, 3/10' }]), { o, p } = ordOf(c.oid);
+      return { cat: 'routine', kind: 'remove', patient: p.id, med: o.med, orderId: c.oid, dose: o.dose, tab: 'prn', cdc: {},
+        text: `${who(p.id)} has ${c.why}. Order: <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Remove one dose.` }; },
+  ],
+  cs: [
+    () => { const c = pickOne([{ oid: 'o107', a: 'pain <b>8/10</b>, RR <b>18</b>', cdc: { pain: 8, rr: 18 } }, { oid: 'o305', a: 'anxious and restless, RR 18', cdc: {} }, { oid: 'o501', a: 'pain <b>7/10</b>, RR <b>16</b> (there are two Thompsons on the unit)', cdc: { pain: 7, rr: 16 } }, { oid: 'o402', a: 'pain <b>5/10</b>', cdc: { pain: 5 } }]), { o, p } = ordOf(c.oid);
+      return { cat: 'cs', kind: 'remove', patient: p.id, med: o.med, orderId: c.oid, dose: o.dose, tab: 'prn', cdc: c.cdc,
+        text: `${who(p.id)}: ${c.a}. Order: <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Stock: ${esc(medDesc(o.med))}. Remove the dose and document any waste <b>now</b> with a witness.` }; },
+    () => { const c = pickOne([{ oid: 'o201', doses: [0.2, 0.3, 0.4, 0.5, 0.6], cdc: { pain: 7, rr: 16 } }, { oid: 'o202', doses: [5, 10], cdc: { pain: 5 } }]), { o, p } = ordOf(c.oid), d = pickOne(c.doses);
+      return { cat: 'cs', kind: 'remove', patient: p.id, med: o.med, orderId: c.oid, dose: d, range: true, tab: 'prn', cdc: c.cdc,
+        text: `${who(p.id)}: pain ${c.cdc.pain}/10${c.cdc.rr ? `, RR ${c.cdc.rr}` : ''}. Range order: <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Per the titration guideline you will give <b>${num(d)} ${F[o.med].unit}</b>. Stock: ${esc(medDesc(o.med))}. Remove it and document any waste <b>now</b>.` }; },
+  ],
+  override: [
+    () => { const c = pickOne([
+        { pid: 'P4', med: 'naloxone_inj', dose: 0.4, why: 'RR <b>7</b>, SpO₂ 86% and pinpoint pupils after an opioid', how: 'IV now' },
+        { pid: 'P3', med: 'dextrose50_inj', dose: 25, why: 'blood glucose <b>42 mg/dL</b>, diaphoretic and unable to swallow', how: 'IV push now' },
+        { pid: 'P1', med: 'nitroglycerin_sl', dose: 0.4, why: 'new chest pain 6/10, BP 138/84', how: 'SL now' },
+        { pid: 'P3', med: 'epinephrine_inj', dose: 0.3, why: 'hives, wheezing and BP 84/50 minutes after an IV antibiotic', how: 'IM now' },
+        { pid: 'P2', med: 'diphenhydramine_inj', dose: 25, why: 'new itchy hives on both arms', how: 'IV now' }]);
+      return { cat: 'override', kind: 'remove', override: true, patient: c.pid, med: c.med, dose: c.dose, cdc: {},
+        text: `Rapid response for ${who(c.pid)}: ${c.why}. The provider gives a verbal order that pharmacy has not verified: <b>${esc(medLabel(c.med))} ${num(c.dose)} ${F[c.med].unit} ${F[c.med].route} ${c.how}</b>. Remove it on override.` }; },
+  ],
+  ret: [
+    () => { const c = pickOne([{ oid: 'o202', dose: 5, why: 'says the pain has eased and declines it' }, { oid: 'o108', dose: 4, why: 'says the nausea has passed' }, { oid: 'o402', dose: 5, why: 'has fallen asleep comfortably' }, { oid: 'o307', dose: 650, why: 'declines it — no pain now' }]), { o, p } = ordOf(c.oid);
+      const q = cartItem(o.med, c.dose, {}).qty;
+      return { cat: 'ret', kind: 'return', patient: p.id, med: o.med, orderId: c.oid, dose: c.dose, qty: q, seed: () => seedRemoval({ patient: p.id, med: o.med, orderId: c.oid, dose: c.dose, minsAgo: 3, refused: true }),
+        text: `A few minutes ago you removed <b>${q} ${unitWord(o.med, q)} of ${esc(medLabel(o.med))}</b> for ${who(p.id)}. At the bedside the patient ${c.why}. The package is sealed. Return it.` }; },
+  ],
+  safety: [
+    () => { const hr = rint(46, 56); return { cat: 'safety', kind: 'hold', patient: 'P1', med: 'digoxin_tab', orderId: 'o101', dose: 0.125, cdc: { hr }, tab: 'due',
+        text: `It is time for ${who('P1')}'s <b>digoxin 0.125 mg PO daily</b>. Apical pulse <b>${hr}</b> bpm (counted for a full minute).`, holdWhy: `Apical pulse ${hr} is below 60: hold digoxin and notify the provider.` }; },
+    () => { const hr = rint(50, 58), sbp = rint(88, 98); return { cat: 'safety', kind: 'hold', patient: 'P1', med: 'metoprolol_tab', orderId: 'o102', dose: 25, cdc: { hr, sbp }, tab: 'due',
+        text: `It is time for ${who('P1')}'s <b>metoprolol tartrate 25 mg PO BID</b>. HR <b>${hr}</b>, BP <b>${sbp}/58</b>.`, holdWhy: `HR ${hr} and SBP ${sbp} meet the hold parameters (HR < 60 or SBP < 100): hold and notify the provider.` }; },
+    () => { const rr = rint(8, 10); return { cat: 'safety', kind: 'hold', patient: 'P1', med: 'morphine_inj', orderId: 'o107', dose: 2, cdc: { pain: 7, rr }, tab: 'prn',
+        text: `${who('P1')} rates his pain 7/10 but is drowsy; RR <b>${rr}</b>. Order: <b>morphine 2 mg IV q4h PRN severe pain</b>.`, holdWhy: `RR ${rr} is below 12: hold the opioid, assess sedation and notify the provider.` }; },
+    () => ({ cat: 'safety', kind: 'hold', patient: 'P4', med: 'morphine_inj', dose: 2, override: true, cdc: { pain: 8, rr: 16 },
+        text: `A covering provider in the hallway asks you to "grab morphine 2 mg IV" for ${who('P4')}, pain 8/10. There is no written order yet.`, holdWhy: 'Robert Thompson is allergic to morphine (hives): do not give it; clarify the order with the prescriber.' }),
+    () => { const mins = rint(60, 150); return { cat: 'safety', kind: 'hold', patient: 'P1', med: 'morphine_inj', orderId: 'o107', dose: 2, cdc: { pain: 6, rr: 16 }, tab: 'prn',
+        seed: () => seedRemoval({ patient: 'P1', med: 'morphine_inj', orderId: 'o107', dose: 2, minsAgo: mins }),
+        text: `${who('P1')} asks for more pain medicine; pain 6/10, RR 16. Order: <b>morphine 2 mg IV q4h PRN severe pain</b>.`, holdWhy: `The last dose was removed ${mins} minutes ago. The order is every 4 hours, so the next dose is not due yet.` }; },
+  ],
+};
+function genTask(cat) { const pool = cat && cat !== 'all' ? TASKGEN[cat] : Object.values(TASKGEN).flat(); return pickOne(pool)(); }
+
+let PX = { task: null, events: [], result: null, held: false, showAnswer: false };
+let QZ = null;
+const newQuiz = () => ({ count: 5, cats: shuffle(['routine', 'cs', 'override', 'ret', 'safety']), results: [], done: false });
+function newTask(same = false, quiet = false) {
+  if (db.mode === 'checkoff' && QZ && QZ.results.length >= QZ.count) { QZ.done = true; PX = { task: null, events: [], result: null }; if (!quiet) renderCoach(); return; }
+  const t = same && PX.task ? PX.task : db.mode === 'checkoff' ? genTask(QZ.cats[QZ.results.length]) : genTask(db.pfilter || 'all');
+  cancelFlows(); session.cart = [];
+  if (t.orderId) delete db.orders[t.orderId];
+  if (db.physical[t.med] < 6) db.physical[t.med] = F[t.med].count;
+  db.inventory[t.med] = db.physical[t.med];
+  if (t.seed) t.seed();
+  const mine = db.myPatients.student || [];
+  db.myPatients.student = mine.includes(t.patient) ? mine : [...mine, t.patient];
+  PX = { task: t, events: [], result: null, held: false, showAnswer: false };
+  save();
+  if (quiet) return;
+  if (session.user) go(isOmni() ? 'patients' : 'home'); else go('standby');
+}
+function practiceEvent(e) {
+  if (!['practice', 'checkoff'].includes(db.mode) || !PX.task || PX.result) return;
+  PX.events.push(e);
+  const t = PX.task;
+  if (t.kind === 'return' ? e.type === 'returned' : e.type === 'txn_done') finishTask(false);
+  else if (t.kind === 'hold' && e.med === t.med && (e.type === 'hold_cancel' || e.type === 'prn_hold' || (e.type === 'allergy_alert' && e.action === 'cancel'))) finishTask(true);
+}
+function finishTask(held) {
+  PX.held = PX.held || held;
+  PX.result = evalTask(PX.task, PX.events, PX.held);
+  if (db.mode === 'checkoff') QZ.results.push({ task: PX.task, result: PX.result });
+  else {
+    const sc = db.pscore = db.pscore || { correct: 0, total: 0, streak: 0, best: 0 };
+    sc.total++; if (PX.result.ok) { sc.correct++; sc.streak++; sc.best = Math.max(sc.best, sc.streak); } else sc.streak = 0;
+  }
+  save(); renderCoachSoon();
+  toast(PX.result.ok ? 'Correct — see the Practice Coach.' : 'Not quite — see the Practice Coach.', PX.result.ok ? 'good' : '', () => $('#coach').scrollIntoView({ behavior: 'smooth' }));
+}
+const pn = id => { const p = PAT(id); return p ? `${p.last}, ${p.first}` : '—'; };
+function taskWaste(t) { const m = F[t.med]; if (!m.controlled || m.noSplit) return 0; return +(cartItem(t.med, t.dose, {}).qty * m.strength - t.dose).toFixed(4); }
+function evalTask(t, ev, held) {
+  const items = [], u = F[t.med].unit, rems = ev.filter(e => e.type === 'removed');
+  if (t.kind === 'hold') {
+    const gave = rems.find(r => r.med === t.med);
+    items.push({ label: 'Held and clarified', want: t.holdWhy, got: gave ? `Removed ${medLabel(gave.med)}` : held ? 'Held' : '—', ok: held && !gave });
+    return { ok: items[0].ok, items };
+  }
+  if (held) return { ok: false, items: [{ label: 'Medication', want: t.kind === 'return' ? `Return ${medLabel(t.med)}` : `Remove ${medLabel(t.med)} ${num(t.dose)} ${u}`, got: 'Held — this task was safe to complete', ok: false }] };
+  if (t.kind === 'return') {
+    const r = ev.find(e => e.type === 'returned');
+    items.push({ label: 'Patient', want: pn(t.patient), got: r ? pn(r.patient) : '—', ok: !!r && r.patient === t.patient });
+    items.push({ label: 'Medication returned', want: `${t.qty} ${unitWord(t.med, t.qty)} ${medLabel(t.med)}`, got: r ? `${r.qty} ${medLabel(r.med)}` : '—', ok: !!r && r.med === t.med && r.qty === t.qty });
+    if (rems.length) items.push({ label: 'Other removals', want: 'None', got: rems.map(x => medLabel(x.med)).join(', '), ok: false });
+    return { ok: items.every(i => i.ok), items };
+  }
+  const r = rems.find(x => x.med === t.med && x.patient === t.patient) || rems.find(x => x.med === t.med) || rems[0];
+  items.push({ label: 'Patient', want: pn(t.patient), got: r ? pn(r.patient) : 'Nothing removed', ok: !!r && r.patient === t.patient });
+  items.push({ label: 'Medication', want: medLabel(t.med), got: r ? medLabel(r.med) : '—', ok: !!r && r.med === t.med });
+  items.push({ label: 'Dose', want: `${num(t.dose)} ${u}`, got: r ? `${num(r.dose)} ${F[r.med].unit}` : '—', ok: !!r && Math.abs(r.dose - t.dose) < 1e-6 });
+  items.push(t.override
+    ? { label: 'Removed on override', want: 'Override with a reason', got: r ? (r.override ? 'Override' : 'Patient profile') : '—', ok: !!r && r.override }
+    : { label: 'Used the verified order', want: 'From the patient profile', got: r ? (r.override ? 'Override (an order already exists)' : 'Patient profile') : '—', ok: !!r && !r.override });
+  if (F[t.med].controlled) { const c = ev.filter(e => e.type === 'count' && e.med === t.med), okc = c.length > 0 && c.every(x => x.correct);
+    items.push({ label: isOmni() ? 'Countback' : 'Blind count', want: 'Accurate count', got: c.length ? (okc ? 'Accurate' : 'Did not match the drawer') : 'Not done', ok: okc }); }
+  const w = taskWaste(t);
+  if (w > 1e-6) { const we = ev.filter(e => e.type === 'waste' && e.med === t.med), tot = we.reduce((n, x) => n + x.amount, 0);
+    items.push({ label: 'Waste with a witness', want: amtText(t.med, w), got: we.length ? amtText(t.med, tot) : 'Not documented (left for later)', ok: we.length > 0 && Math.abs(tot - w) < 1e-6 }); }
+  const extra = rems.filter(x => x !== r);
+  if (extra.length) items.push({ label: 'Other removals', want: 'None', got: extra.map(x => medLabel(x.med)).join(', '), ok: false });
+  return { ok: items.every(i => i.ok), items };
+}
+function taskMath(t) {
+  if (t.kind === 'hold') return esc(t.holdWhy);
+  const m = F[t.med], q = cartItem(t.med, t.dose, {}).qty, removed = q * m.strength, w = taskWaste(t);
+  let s = `Dose ${num(t.dose)} ${m.unit} from ${esc(medDesc(t.med))} → ${t.kind === 'return' ? 'return' : 'remove'} ${q} ${unitWord(t.med, q)} (${num(removed)} ${m.unit}).`;
+  if (w > 1e-6) s += ` Waste = ${num(removed)} − ${num(t.dose)} = <b>${num(w)} ${m.unit}</b>${m.volume ? `; ${num(w)} ${m.unit} ÷ ${num(m.strength / m.volume)} ${m.unit}/mL = <b>${num(volOf(t.med, w))} mL</b>` : ''}.`;
+  else if (t.kind === 'remove' && !m.controlled && !m.noSplit && removed - t.dose > 1e-6) s += ` Discard the unused ${amtText(t.med, removed - t.dose)} (not a controlled substance).`;
+  return s;
+}
+function answerSteps(t) {
+  const o = isOmni(), nm = `<b>${esc(pn(t.patient))}</b>`, med = `<b>${esc(medLabel(t.med))}</b>`, w = taskWaste(t), u = F[t.med].unit;
+  const cdcTxt = Object.entries(t.cdc || {}).map(([k, v]) => `${({ hr: 'HR', sbp: 'SBP', pain: 'pain', rr: 'RR' })[k]} ${v}`).join(', ');
+  const s = [o ? 'Log on: user ID <b>student</b>, Enter, password <b>nurse1</b>, Enter.' : 'Tap the screen and sign in: user ID <b>student</b>, password <b>nurse1</b>.'];
+  if (t.kind === 'hold') {
+    return [`Read the task: ${esc(t.holdWhy)}`, 'Do not remove the medication. If you already started, cancel when the cabinet warns you (hold parameter, allergy or last-dose alert).', 'Press <b>Can\'t give: hold and clarify</b>, notify the provider and document the held dose.'];
+  }
+  if (t.kind === 'return') return s.concat(o
+    ? [`Select ${nm} → <b>Return Meds</b>.`, `Select ${med} on Meds Eligible to Return.`, `Administration Amount <b>0</b>, Quantity to Return <b>${t.qty}</b>, pick a reason, check "sealed", <b>Return Now</b>.`, ...(F[t.med].controlled ? ['Witness: <b>kjones</b> / <b>pyxis1</b>.'] : []), 'Place it in the return bin → <b>OK</b>.']
+    : [`My Patients → select ${nm} → <b>Return</b>.`, `Select ${med}, quantity <b>${t.qty}</b>, check "sealed" → <b>Return</b>.`, ...(F[t.med].controlled ? ['Witness: <b>kjones</b> / <b>pyxis1</b>.'] : []), 'Place it in the return bin → <b>Accept</b>.']);
+  if (t.override) return s.concat(o
+    ? [`Select ${nm} → <b>Remove Meds</b> → <b>Stocked Meds</b> tab.`, `Select ${med} → <b>Yes</b> → reason <b>Emergency Situation</b> → OK.`, `Amount to administer <b>${num(t.dose)} ${u}</b> → OK.`, '<b>Remove Now</b> → follow the guiding lights → <b>OK</b>.']
+    : [`Select ${nm} → <b>Override</b>.`, `Select ${med}; amount to administer <b>${num(t.dose)} ${u}</b> → OK.`, '<b>Remove Med</b> → reason <b>Emergency / rapid response</b> → Remove Meds.', 'Take it from the lit pocket → <b>Remove &amp; Close Drawer</b>.']);
+  const tab = t.tab === 'due' ? (o ? 'Scheduled Meds' : 'Due Now') : (o ? 'PRN Only' : 'PRN');
+  const out = s.concat(o ? [`Select ${nm} → <b>Remove Meds</b>.`, `<b>${tab}</b> tab → select ${med}.`] : [`My Patients → select ${nm} → <b>Remove</b>.`, `<b>${tab}</b> tab → select ${med}.`]);
+  if (cdcTxt) out.push(`Enter the assessment: ${cdcTxt}.`);
+  out.push(t.range ? `Amount to administer: <b>${num(t.dose)} ${u}</b>.` : o ? 'Confirm the intended dose → <b>OK</b>.' : `It moves to Selected Meds.`);
+  if (o) { out.push('<b>Remove Now</b> → open the lit bin, take the item → <b>OK</b>.'); if (F[t.med].controlled) out.push('Countback: enter the quantity <b>remaining</b> in the bin.'); }
+  else { out.push('<b>Remove Med</b>.'); if (F[t.med].controlled) out.push('Blind count: count what is in the pocket <b>before</b> removing.'); out.push('<b>Remove &amp; Close Drawer</b>.'); }
+  if (w > 1e-6) out.push(o ? `<b>Waste Partial Dose</b>: Administration ${num(t.dose)}, Waste <b>${num(w)} ${u}</b>, pick a reason → witness <b>kjones</b> / <b>pyxis1</b>.` : `<b>Waste Now</b>: waste <b>${amtText(t.med, w)}</b> → witness <b>kjones</b> / <b>pyxis1</b>.`);
+  return out;
+}
+
+function describe(e) {
+  const ml = id => (F[id] ? esc(medLabel(id)) : ''), p = id => esc(pn(id));
+  switch (e.type) {
+    case 'signin': return `Signed in with ${e.method === 'password' ? 'password' : 'fingerprint'}`;
+    case 'signout': return 'Signed out';
+    case 'patient_action': return `${p(e.patient)} → ${esc(({ remove: T('remove'), override: 'Override', return: 'Return', waste: 'Waste', past: T('past'), kits: 'Kits' })[e.action] || e.action)}`;
+    case 'cdc': return `Assessment entered for ${ml(e.med)}${e.held ? ' — hold parameter met' : ''}`;
+    case 'hold_cancel': return `Held ${ml(e.med)} (hold parameter)`;
+    case 'dose_entered': return `Amount to administer: ${num(e.dose)} ${F[e.med].unit} ${ml(e.med)}`;
+    case 'count': return `${isOmni() ? 'Countback' : 'Blind count'} ${ml(e.med)}: ${e.correct ? 'accurate' : 'did not match the drawer'}`;
+    case 'removed': return `Removed ${e.qty} ${unitWord(e.med, e.qty)} ${ml(e.med)} for ${p(e.patient)}${e.override ? ' (override)' : ''}`;
+    case 'waste': return `Wasted ${amtText(e.med, e.amount)} ${ml(e.med)} — witness ${esc(userName(e.witness))}`;
+    case 'waste_later': return `Waste left for later: ${ml(e.med)}`;
+    case 'returned': return `Returned ${e.qty} ${ml(e.med)}`;
+    case 'allergy_alert': return `Allergy alert: ${ml(e.med)} — ${e.action === 'cancel' ? 'cancelled' : 'overridden'}`;
+    case 'order_exists': return `Order-exists alert: ${ml(e.med)}`;
+    case 'override_reason': return `Override reason: ${esc(e.reason)}`;
+    case 'prn_hold': return `Cancelled ${ml(e.med)} after the last-dose warning`;
+    case 'discrepancy_created': return `Discrepancy created: ${ml(e.med)}`;
+    case 'discrepancy_resolved': return `Discrepancy resolved: ${ml(e.med)}`;
+    case 'mypatients_saved': return 'My Patients list saved';
+    case 'temp_added': return `Temporary patient added: ${p(e.patient)}`;
+    case 'kit_selected': case 'kit_removed': return `${e.type === 'kit_selected' ? 'Selected' : 'Removed'} ${esc((KITS.find(k => k.id === e.kit) || {}).name || 'kit')}`;
+    case 'nurseprep_selected': return 'Selected a nurse-prepared order';
+    case 'remote_created': return `Anywhere RN ${esc(e.kind)} request created`;
+    case 'remote_started': return `Started the pending ${esc(e.kind)} request`;
+    default: return esc(e.type);
+  }
+}
+
 const coach = $('#coach');
+function modeSummary(m) {
+  if (m === 'practice') return 'A new task every round: scheduled and PRN meds, controlled substances with waste, overrides, returns, and safety checks you should refuse. Your score and streak are kept.';
+  if (m === 'checkoff') return 'Five random tasks, one from each type, one attempt each, then a score you can copy for your instructor.';
+  if (m === 'free') return 'No checklist. Explore every screen: sign in, look up patients, remove, override, waste, return, kits, temporary patients and discrepancies. The event history shows what the cabinet recorded.';
+  const S = scenById(m); return S ? devText(S.brief).replace(/<[^>]+>/g, '') : '';
+}
+function practiceHtml() {
+  if (db.mode === 'checkoff' && QZ && QZ.done) {
+    const ok = QZ.results.filter(q => q.result.ok).length, pct = Math.round(ok / QZ.count * 100);
+    return `<div class="pr-result ${pct >= 80 ? 'good' : 'bad'}"><strong>Check-off score: ${pct}% (${ok} of ${QZ.count})</strong>
+      <table class="pr-table"><thead><tr><th>Task</th><th>Result</th></tr></thead><tbody>${QZ.results.map((q, i) => `<tr class="${q.result.ok ? 'ok' : 'no'}"><td>${i + 1}. ${esc(PCATS[q.task.cat])}: ${esc(pn(q.task.patient))} — ${esc(medLabel(q.task.med))}</td><td>${q.result.ok ? '✓ Correct' : '✕ ' + esc(q.result.items.filter(x => !x.ok).map(x => x.label).join(', '))}</td></tr>`).join('')}</tbody></table></div>
+      <div class="coach-btns"><button class="btn small" data-cact="copyquiz">Copy results for instructor</button><button class="btn small" data-cact="newquiz">Start a new check-off</button></div>`;
+  }
+  const t = PX.task; if (!t) return '';
+  const p = PAT(t.patient), sc = db.pscore || { correct: 0, total: 0, streak: 0, best: 0 }, quiz = db.mode === 'checkoff';
+  const head = quiz ? `<div class="pr-head"><h3>Check-off · task ${QZ.results.length + (PX.result ? 0 : 1)} of ${QZ.count}</h3></div><p class="small muted">One attempt per task. No answers or skips.</p>`
+    : `<div class="pr-head"><h3>Practice mode</h3><label class="pr-spec" for="pcat">Task type <select id="pcat">${Object.entries(PCATS).map(([k, v]) => `<option value="${k}"${(db.pfilter || 'all') === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label></div>
+      <div class="pr-score"><span><b>${sc.correct}</b>/${sc.total} correct</span><span>Streak <b>${sc.streak}</b></span><span>Best <b>${sc.best}</b></span></div>`;
+  const band = `<dl class="band"><div class="bname">${esc(pn(t.patient))}</div><dt>Room</dt><dd class="mono">${esc(p.room)}</dd><dt>MRN</dt><dd class="mono">${esc(p.mrn)}</dd><dt>DOB</dt><dd class="mono">${fmtDob(p.dob)}</dd><dt>Allergies</dt><dd>${esc(allergyText(p))}</dd></dl>`;
+  const order = `<div class="orders"><h4>Task</h4><p>${t.text}</p></div>`;
+  let body;
+  if (PX.result) {
+    const r = PX.result;
+    body = `<div class="pr-result ${r.ok ? 'good' : 'bad'}"><strong>${r.ok ? 'Correct' : 'Not quite'}</strong>
+      <table class="pr-table"><thead><tr><th></th><th>Task needs</th><th>You did</th></tr></thead><tbody>${r.items.map(i => `<tr class="${i.ok ? 'ok' : 'no'}"><td>${i.ok ? '✓' : '✕'} ${esc(i.label)}</td><td>${esc(i.want)}</td><td>${esc(i.got)}</td></tr>`).join('')}</tbody></table>
+      <p class="pr-math">${taskMath(t)}</p></div>
+      <div class="coach-btns">${quiz ? `<button class="btn small primary-c" data-cact="pnext">${QZ.results.length < QZ.count ? `Next task (${QZ.results.length + 1} of ${QZ.count})` : 'See my results'}</button>`
+        : `<button class="btn small primary-c" data-cact="pnext">Next task</button>${r.ok ? '' : '<button class="btn small" data-cact="pretry">Try this task again</button>'}`}</div>`;
+  } else {
+    body = `<p class="pr-help">Use the cabinet to do the task. Your work is checked when the ${t.kind === 'return' ? 'return' : 'removal'} is finished. If the order should <b>not</b> be given, don't remove it.</p>
+      <div class="coach-btns"><button class="btn small" data-cact="phold">Can't give: hold and clarify</button>${quiz ? '' : `<button class="btn small" data-cact="panswer">${PX.showAnswer ? 'Hide' : 'Show'} the answer</button><button class="btn small ghost" data-cact="pskip">Skip</button>`}</div>
+      ${PX.showAnswer ? `<div class="pr-answer"><ol>${answerSteps(t).map(x => `<li>${x}</li>`).join('')}</ol><p class="pr-math">${taskMath(t)}</p></div>` : ''}`;
+  }
+  return head + band + order + body;
+}
+function scenarioHtml() {
+  const sc = db.scen, S = sc && scenById(sc.id); if (!S) return '';
+  const stepsHtml = S.steps.map((s, i) => {
+    const state = sc.missed.includes(i) ? 'missed' : i < sc.step ? 'done' : i === sc.step && !sc.done ? 'current' : 'todo';
+    return `<li class="st ${state}"><span class="st-mark" aria-hidden="true">${state === 'done' ? '✓' : state === 'missed' ? '✕' : i + 1}</span><div><span>${devText(s.text)}</span>${state === 'missed' ? '<span class="small bad">Missed or out of order</span>' : ''}</div></li>`;
+  }).join('');
+  const hints = S.steps.map(s => s.hint).filter(Boolean), shown = Math.min(session.hintsShown || 0, hints.length);
+  const deb = DEBRIEFS[S.id];
+  return `<div class="scen"><div class="scen-top"><span class="lvl">${S.level}${S.device ? ' · Omnicell only' : ''}</span><h3>${devText(S.title)}</h3></div><div class="brief">${devText(S.brief)}</div>
+    <p class="small muted">Checklist · ${sc.step - sc.missed.filter(i => i < sc.step).length}/${S.steps.length}</p><div class="progress"><i style="width:${Math.round(sc.step / S.steps.length * 100)}%"></i></div>
+    <ol class="steps">${stepsHtml}</ol>
+    ${hints.length ? `<div class="coach-btns"><button class="btn small" data-cact="hint"${shown >= hints.length ? ' disabled' : ''}>${shown ? 'Next hint' : 'Show a hint'} (${shown}/${hints.length})</button></div>${shown ? `<ol class="hintlist">${hints.slice(0, shown).map(h => `<li>${devText(h)}</li>`).join('')}</ol>` : ''}` : ''}
+    ${sc.errors.length ? `<div class="errs"><b>Safety concerns</b><ul>${sc.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : ''}
+    ${sc.done ? resultHtml(sc, S) : ''}
+    ${deb ? (sc.done || session.showDebrief ? `<div class="debrief"><b>Debrief</b><p>${esc(deb)}</p></div>` : '<div class="coach-btns"><button class="btn small ghost" data-cact="debrief">Show debrief</button></div>') : ''}</div>`;
+}
 function renderCoach() {
-  const sc = db.scen, S = sc && scenById(sc.id);
+  const mode = db.mode || 'practice';
+  const sel = mode === 'scen' && db.scen ? db.scen.id : mode;
   let html = `<div class="coach-head"><h2>Practice Coach</h2><button class="btn small ghost only-narrow" data-cact="toDevice">Back to cabinet ↑</button></div>
     <div class="dev-switch" role="radiogroup" aria-label="Cabinet type">${Object.values(DEVICES).map(d => `<button role="radio" aria-checked="${D().key === d.key}" class="${D().key === d.key ? 'on' : ''}" data-cact="device" data-dev="${d.key}"><b>${d.key === 'pyxis' ? 'Pyxis' : 'Omnicell'}</b><span>${d.key === 'omnicell' ? 'Omnicell XT · Color Touch' : 'Pyxis MedStation ES'}</span></button>`).join('')}</div>
     ${isOmni() ? `<button class="btn small arn-open" data-cact="arn">Open Anywhere RN (nurses' station)${(db.remote || []).length ? ` · ${db.remote.length} pending` : ''}</button>` : ''}
-    ${isOmni() ? '<p class="small muted dev-note"><b>Omnicell workflow</b> (Color Touch user guide): log on → patient list → select patient → <b>Remove Meds</b>, <b>Return Meds</b> or <b>Waste Meds</b>. Controlled meds use a <b>countback</b> (quantity remaining after you remove). Overrides come from the <b>Stocked Meds</b> tab. Press <b>Exit</b> to log off.</p>' : '<p class="small muted dev-note"><b>Pyxis workflow:</b> select the patient first, then choose Remove, Return, Waste or Override. Controlled meds use a <b>blind count</b> before you remove.</p>'}`;
-  if (S) {
-    const stepsHtml = S.steps.map((s, i) => {
-      const state = sc.missed.includes(i) ? 'missed' : i < sc.step ? 'done' : i === sc.step && !sc.done ? 'current' : 'todo';
-      return `<li class="st ${state}"><span class="st-mark" aria-hidden="true">${state === 'done' ? '✓' : state === 'missed' ? '✕' : i + 1}</span><div><span>${devText(s.text)}</span>${state === 'current' && s.hint ? `<details class="hint"><summary>Hint</summary><p>${devText(s.hint)}</p></details>` : ''}${state === 'missed' ? '<span class="small bad">Missed or out of order</span>' : ''}</div></li>`;
-    }).join('');
-    html += `<div class="scen"><div class="scen-top"><span class="lvl">${S.level}</span><h3>${devText(S.title)}</h3></div><div class="brief">${devText(S.brief)}</div>
-      <ol class="steps">${stepsHtml}</ol>
-      ${sc.errors.length ? `<div class="errs"><b>Safety concerns</b><ul>${sc.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : ''}
-      ${sc.done ? resultHtml(sc, S) : ''}
-      <div class="coach-btns"><button class="btn small" data-cact="restart">Restart</button><button class="btn small ghost" data-cact="exit">Exit scenario</button></div></div>`;
-  } else {
-    html += `<p class="coach-intro">You are in <b>free practice</b>. Explore the ${D().name}, or choose a guided scenario for step-by-step coaching and feedback.</p>`;
-  }
-  html += `<details class="coach-sec" ${S && !sc.done ? '' : 'open'}><summary>Guided scenarios</summary><ul class="scen-list">${SCENARIOS.map(s => `<li><button class="scen-btn ${sc && sc.id === s.id ? 'on' : ''}" data-cact="start" data-id="${s.id}"><span class="lvl">${s.level}${s.device ? ' · ' + (s.device === 'omnicell' ? 'Omnicell only' : 'Pyxis only') : ''}</span><span>${devText(s.title)}</span></button></li>`).join('')}</ul><p class="small muted">Starting a scenario resets patients, inventory and transactions (practice accounts are kept).</p></details>
+    <div class="picker"><label for="modeSel">Mode</label><select id="modeSel">
+      <option value="practice"${sel === 'practice' ? ' selected' : ''}>Practice mode: random tasks</option>
+      <option value="checkoff"${sel === 'checkoff' ? ' selected' : ''}>Check-off: 5 random tasks</option>
+      <option value="free"${sel === 'free' ? ' selected' : ''}>Free practice: explore the cabinet</option>
+      <optgroup label="Guided scenarios">${SCENARIOS.map(s => `<option value="${s.id}"${sel === s.id ? ' selected' : ''}>${esc(s.level)}: ${esc(devText(s.title).replace(/<[^>]+>/g, ''))}${s.device ? ' (Omnicell only)' : ''}</option>`).join('')}</optgroup></select>
+      <p class="summary">${esc(modeSummary(sel))}</p>
+      <div class="coach-btns"><button class="btn small" data-cact="restartMode">${mode === 'scen' ? 'Restart scenario' : mode === 'free' ? 'Reset practice data' : mode === 'checkoff' ? 'Restart check-off' : 'New task'}</button></div></div>`;
+  if (mode === 'practice' || mode === 'checkoff') html += `<div class="pr">${practiceHtml()}</div>`;
+  else if (mode === 'scen') html += scenarioHtml();
+  else html += `<div class="scen"><h3>Free practice</h3><p class="small">No checklist. Some things to try:</p><ul class="small ideas">
+      <li>Sign in with a password, then register and use BioID (User ${isOmni() ? 'Menus' : 'Preferences'}).</li><li>Build My Patients, then remove a scheduled med and a PRN.</li>
+      <li>Remove a controlled substance: ${isOmni() ? 'countback' : 'blind count'}, then waste now or later.</li><li>Override an emergency med; try morphine for Robert Thompson and read the allergy alert.</li>
+      <li>Return an unopened item; remove a kit; add a temporary patient.</li><li>Remove fentaNYL and count carefully — the pocket is one short. Then resolve the discrepancy.</li></ul></div>`;
+  html += `<details class="coach-sec" id="histDet"${mode === 'free' || session.histOpen ? ' open' : ''}><summary>Event history</summary>${hist.length ? `<ol class="history">${hist.slice(0, 25).map(h => `<li><span class="mono">${hhmm(h.t)}</span> ${describe(h.e)}</li>`).join('')}</ol>` : '<p class="small muted">Nothing recorded yet.</p>'}</details>
     <details class="coach-sec"><summary>Practice accounts</summary><ul class="small">
-      <li><b>Student:</b> <code>student</code> — first sign-in password <code>123456</code></li>
-      <li><b>Witness RNs:</b> <code>kjones</code> / <code>pyxis1</code> · <code>mlee</code> / <code>pyxis2</code> (both have BioID)</li>
-      <li><b>BioID:</b> press and hold the on-screen scanner about 1.5 s. Lift early to practice a failed scan. On a phone or laptop with a fingerprint reader or Face ID you can also link the device's biometrics.</li></ul></details>
+      <li><b>You:</b> user ID <code>student</code>, password <code>nurse1</code></li>
+      <li><b>Witness RNs:</b> <code>kjones</code> / <code>pyxis1</code> · <code>mlee</code> / <code>pyxis2</code></li>
+      <li>The user ID and password are also shown under each box on the sign-in screens.</li>
+      <li><b>BioID:</b> press and hold the on-screen scanner about ${isOmni() ? '2' : '1.5'} seconds. Lift early to practice a failed scan.</li></ul></details>
     <details class="coach-sec"><summary>Settings</summary>
       <label class="check"><input type="checkbox" data-cact="challenge" ${db.settings.challenge ? 'checked' : ''}> <span><b>Dosage-calculation challenge</b><br><span class="muted small">Hide the calculated waste. Students calculate the waste amount and volume themselves.</span></span></label>
-      <div class="coach-btns"><button class="btn small" data-cact="resetPractice">Reset practice data</button><button class="btn small danger" data-cact="resetAll">Reset everything</button></div></details>
+      <div class="coach-btns"><button class="btn small" data-cact="resetScore">Reset my score</button><button class="btn small danger" data-cact="resetAll">Reset everything</button></div></details>
     <details class="coach-sec"><summary>Key symbols</summary><ul class="small keys">
       <li><span class="dot mini"></span> Blue dot — medication due now</li><li><span class="dot mini past"></span> Orange — past due</li>
       <li><span class="stripes mini"></span> Striped — override medication</li><li><span class="ind ind-waste">W</span> Undocumented waste</li><li><span class="ind ind-disc">Δ</span> Discrepancy on the device</li></ul></details>`;
@@ -1848,33 +2061,58 @@ function renderCoach() {
 }
 const nextScen = S => SCENARIOS[SCENARIOS.indexOf(S) + 1];
 function resultHtml(sc, S) {
-  const secs = Math.round((sc.end - sc.start) / 1000);
-  const ok = S.steps.length - sc.missed.length;
-  const pass = !sc.missed.length && !sc.errors.length;
+  const secs = Math.round((sc.end - sc.start) / 1000), ok = S.steps.length - sc.missed.length, pass = !sc.missed.length && !sc.errors.length;
   return `<div class="result ${pass ? 'pass' : 'review'}"><b>${pass ? 'Scenario complete — no errors' : 'Scenario complete — review needed'}</b>
     <p>${ok}/${S.steps.length} steps · ${sc.errors.length} safety concern${sc.errors.length === 1 ? '' : 's'} · ${Math.floor(secs / 60)} min ${secs % 60} s</p>
-    <div class="coach-btns"><button class="btn small" data-cact="copyResult">Copy result for instructor</button>${nextScen(S) ? `<button class="btn small" data-cact="start" data-id="${nextScen(S).id}">Next: ${nextScen(S).title}</button>` : ''}</div></div>`;
+    <div class="coach-btns"><button class="btn small" data-cact="copyResult">Copy result for instructor</button>${nextScen(S) ? `<button class="btn small" data-cact="start" data-id="${nextScen(S).id}">Next: ${esc(devText(nextScen(S).title).replace(/<[^>]+>/g, ''))}</button>` : ''}</div></div>`;
+}
+function setMode(m) {
+  if (m.startsWith('s') && scenById(m)) return startScenario(m);
+  db.mode = m; db.scen = null;
+  if (m === 'checkoff') QZ = newQuiz();
+  save();
+  if (m === 'practice' || m === 'checkoff') newTask();
+  else { PX = { task: null, events: [], result: null }; render(); }
 }
 coach.addEventListener('click', e => {
-  const b = e.target.closest('[data-cact]'); if (!b) return;
+  const b = e.target.closest('[data-cact]'); if (!b || b.disabled) return;
   const a = b.dataset.cact;
   if (a === 'start') startScenario(b.dataset.id);
-  else if (a === 'restart') startScenario(db.scen.id);
-  else if (a === 'exit') { db.scen = null; save(); renderCoach(); }
+  else if (a === 'restartMode') { if (db.mode === 'scen' && db.scen) startScenario(db.scen.id); else if (db.mode === 'free') { freshPractice(); save(); signOutQuiet(); toast('Practice data reset.'); } else setMode(db.mode || 'practice'); }
+  else if (a === 'pnext' || a === 'pskip') newTask();
+  else if (a === 'pretry') newTask(true);
+  else if (a === 'panswer') { PX.showAnswer = !PX.showAnswer; renderCoach(); }
+  else if (a === 'phold') { if (PX.task && !PX.result) finishTask(true); }
+  else if (a === 'newquiz') setMode('checkoff');
+  else if (a === 'copyquiz') { const ok = QZ.results.filter(q => q.result.ok).length;
+    copyText(`MedStation Practice Simulator — check-off\nCabinet: ${D().model}\nDate: ${new Date().toLocaleString()}\nScore: ${Math.round(ok / QZ.count * 100)}% (${ok} of ${QZ.count})\n` + QZ.results.map((q, i) => `${i + 1}. ${PCATS[q.task.cat]}: ${pn(q.task.patient)} — ${medLabel(q.task.med)}: ${q.result.ok ? 'Correct' : 'Missed: ' + q.result.items.filter(x => !x.ok).map(x => x.label).join(', ')}`).join('\n')); }
+  else if (a === 'hint') { session.hintsShown = (session.hintsShown || 0) + 1; renderCoach(); }
+  else if (a === 'debrief') { session.showDebrief = true; renderCoach(); }
   else if (a === 'arn') arnOpen();
   else if (a === 'device') { if (db.settings.device !== b.dataset.dev) { db.settings.device = b.dataset.dev; save(); signOutQuiet(); toast(`Switched to ${D().model}.`); } }
   else if (a === 'toDevice') $('#device').scrollIntoView({ behavior: 'smooth' });
-  else if (a === 'resetPractice') { freshPractice(); db.scen = null; save(); signOutQuiet(); toast('Practice data reset.'); }
-  else if (a === 'resetAll') { db = freshDb(); save(); signOutQuiet(); toast('Everything reset, including practice accounts.'); }
+  else if (a === 'resetScore') { db.pscore = { correct: 0, total: 0, streak: 0, best: 0 }; save(); renderCoach(); toast('Score reset.'); }
+  else if (a === 'resetAll') { db = freshDb(); save(); PX = { task: null, events: [], result: null }; hist.length = 0; setMode('practice'); toast('Everything reset.'); }
   else if (a === 'copyResult') {
     const sc = db.scen, S = scenById(sc.id); const secs = Math.round((sc.end - sc.start) / 1000);
     copyText(`MedStation Practice Simulator — scenario result\nCabinet: ${D().model}\nScenario: ${S.title} (${S.level})\nCompleted: ${new Date(sc.end).toLocaleString()}\nSteps: ${S.steps.length - sc.missed.length}/${S.steps.length}\nMissed: ${sc.missed.map(i => S.steps[i].text.replace(/<[^>]+>/g, '')).join('; ') || 'none'}\nSafety concerns: ${sc.errors.join('; ') || 'none'}\nTime: ${Math.floor(secs / 60)} min ${secs % 60} s`);
   }
 });
-coach.addEventListener('change', e => { if (e.target.dataset.cact === 'challenge') { db.settings.challenge = e.target.checked; save(); toast(e.target.checked ? 'Challenge mode on: calculate waste yourself.' : 'Challenge mode off.'); } });
+coach.addEventListener('change', e => {
+  const t = e.target;
+  if (t.id === 'modeSel') setMode(t.value);
+  else if (t.id === 'pcat') { db.pfilter = t.value; save(); newTask(); }
+  else if (t.dataset.cact === 'challenge') { db.settings.challenge = t.checked; save(); toast(t.checked ? 'Challenge mode on: calculate waste yourself.' : 'Challenge mode off.'); }
+});
+coach.addEventListener('toggle', e => { if (e.target.id === 'histDet') session.histOpen = e.target.open; }, true);
 function signOutQuiet() { cancelFlows(); session.user = null; session.sel = null; session.cart = []; go('standby'); }
 
 $('#coachJump').addEventListener('click', () => $('#coach').scrollIntoView({ behavior: 'smooth' }));
 
+if (/[?&]e2e\b/.test(location.search)) window.__medsim = { task: () => PX.task, result: () => PX.result };
+if (!db.mode) db.mode = 'practice';
+if (db.mode === 'scen' && !db.scen) db.mode = 'free';
+if (db.mode === 'checkoff') QZ = newQuiz();
+if (db.mode === 'practice' || db.mode === 'checkoff') newTask(false, true);
 render();
 })();
