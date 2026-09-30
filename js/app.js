@@ -407,17 +407,14 @@ const SCREENS = {
     const list = ids.map(PAT).filter(Boolean).sort((a, b) => a.last.localeCompare(b.last) || a.first.localeCompare(b.first));
     const sel = list.find(p => p.id === session.sel) ? session.sel : null;
     const rows = list.map(p => {
-      const c = patientCounts(p);
       const undoc = db.removals.some(r => r.undocumented && r.patient === p.id);
-      return `<div class="prow ${sel === p.id ? 'sel' : ''} ${c.past ? 'pastdue' : ''}" data-filterable="${esc(p.last + ' ' + p.first + ' ' + p.room + ' ' + p.mrn)}">
+      return `<div class="prow ${sel === p.id ? 'sel' : ''}" data-filterable="${esc(p.last + ' ' + p.first + ' ' + p.room + ' ' + p.mrn)}">
         <button class="prow-main" data-act="selPatient" data-id="${p.id}" aria-pressed="${sel === p.id}">
           <span class="pr-name"><span class="pr-title"><b>${esc(patName(p))}</b>${p.nameAlert ? ' <span class="chip alert">NAME ALERT</span>' : ''}${p.temp ? ' <span class="chip temp">TEMPORARY</span>' : ''}${p.allergies.length ? ' <span class="chip allergy">ALLERGY</span>' : ''}${undoc ? ' <span class="chip waste">UNDOC WASTE</span>' : ''}</span>
-            <span class="muted small"><span class="rm-inline">Rm <span class="mono">${p.room}</span> · </span>MRN <span class="mono">${p.mrn}</span> · DOB <span class="mono">${fmtDob(p.dob)}</span></span></span>
+            <span class="muted small">${age(p.dob)} y (${fmtDob(p.dob)}) ${p.sex}<span class="rm-inline"> · <span class="mono">${p.mrn}</span> · <span class="mono">${p.room}</span></span></span></span>
+          <span class="pr-visit mono">${p.mrn}</span>
           <span class="pr-room mono">${p.room}</span>
         </button>
-        <span class="pr-col">${c.due ? `<button class="dot ${c.past ? 'past' : ''}" data-act="dot" data-id="${p.id}" data-tab="due" aria-label="${c.due} due now">${c.due}</button>` : '<span class="nodot">–</span>'}</span>
-        <span class="pr-col">${c.prn ? `<button class="dot prn" data-act="dot" data-id="${p.id}" data-tab="prn" aria-label="${c.prn} PRN orders">${c.prn}</button>` : '<span class="nodot">–</span>'}</span>
-        <span class="pr-col"><button class="dot all" data-act="dot" data-id="${p.id}" data-tab="all" aria-label="${c.all} orders">${c.all}</button></span>
       </div>`;
     }).join('');
     const dis = sel ? '' : ' disabled';
@@ -425,10 +422,9 @@ const SCREENS = {
       <div class="seg" role="tablist"><button class="${my ? 'on' : ''}" data-act="list" data-to="my" role="tab" aria-selected="${my}">My Patients</button><button class="${!my ? 'on' : ''}" data-act="list" data-to="all" role="tab" aria-selected="${!my}">${T('allPts')}</button></div>
       <div class="list-tools"><input id="ptsearch" type="search" placeholder="Search last name, room or MRN" data-filter aria-label="Search patients">
         ${my ? '<button class="btn" data-act="go" data-to="editMy">Edit Patient List</button>' : '<button class="btn" data-act="addTemp">Add Temporary Patient</button>'}</div>
-      ${list.length ? `<div class="ptable"><div class="phead"><span>Patient</span><span>Room</span><span class="pr-col">${T('due')}</span><span class="pr-col">PRN</span><span class="pr-col">All Orders</span></div>${rows}</div>
-        <p class="legend"><span class="dot mini"></span> due now · <span class="dot mini past"></span> past due (orange bar) · tap a dot to open that tab</p>`
+      ${list.length ? `<div class="ptable"><div class="phead"><span>Name</span><span>Visit ID</span><span>Location</span></div>${rows}</div>`
       : `<div class="empty"><b>Your My Patients list is empty.</b><p>Select <b>Edit Patient List</b> and add the patients you are assigned to today.</p><button class="btn primary" data-act="go" data-to="editMy">Edit Patient List</button></div>`}`,
-      footer: `<button class="btn" data-act="pa" data-a="remove"${dis}>${T('remove')}</button><button class="btn" data-act="pa" data-a="return"${dis}>Return</button><button class="btn" data-act="pa" data-a="waste"${dis}>Waste</button><button class="btn override" data-act="pa" data-a="override"${dis}>Override</button><button class="btn" data-act="pa" data-a="past"${dis}>${T('past')}</button>` };
+      footer: `<button class="btn" data-act="pa" data-a="remove"${dis}>${T('remove')}</button><button class="btn" data-act="pa" data-a="past"${dis}>${T('past')}</button><button class="btn" data-act="pa" data-a="waste"${dis}>Waste</button><button class="btn" data-act="pa" data-a="return"${dis}>Return</button><button class="btn override" data-act="pa" data-a="override"${dis}>Override</button>` };
   },
 
   editMy() {
@@ -449,22 +445,19 @@ const SCREENS = {
     const cart = session.cart;
     let listHtml;
     if (!ov) {
-      const orders = p.orders.filter(o => { const s = orderStatus(o); return session.tab === 'all' || (session.tab === 'prn' ? s.kind === 'prn' : (s.kind === 'due' || s.kind === 'pastdue')); });
+      // Non-profile style: only this patient's orders, alphabetical, with no due times or due markers.
+      // Due times live on the MAR in the EMR; the cabinet still warns on early, repeat or too-soon removals.
+      const orders = [...p.orders].sort((a, b) => F[a.med].name.localeCompare(F[b.med].name));
       listHtml = orders.length ? orders.map(o => {
-        const s = orderStatus(o), m = F[o.med];
-        let when = '';
-        if (s.kind === 'due') when = `<span class="due now">Due ${hhmm(s.due)}</span>`;
-        else if (s.kind === 'pastdue') when = `<span class="due past">PAST DUE ${hhmm(s.due)}</span>`;
-        else if (s.kind === 'future') when = `<span class="due future">Next ${hhmm(s.due)}</span>`;
-        else if (s.kind === 'given') when = `<span class="due given">Removed ${hhmm(s.at)}</span>`;
-        else when = `<span class="due prn">PRN${s.last ? ' · last ' + hhmm(s.last) : ''}</span>`;
+        const m = F[o.med];
+        const when = `<span class="due">${esc(m.route)}</span>`;
         const inCart = cart.some(c => c.orderId === o.id);
-        return `<button class="mrow ${inCart ? 'incart' : ''} ${s.kind}" data-act="pickOrder" data-id="${o.id}" data-filterable="${esc(m.name + ' ' + m.brand)}">
+        return `<button class="mrow ${inCart ? 'incart' : ''}" data-act="pickOrder" data-id="${o.id}" data-filterable="${esc(m.name + ' ' + m.brand)}">
           <span class="m-name"><b>${esc(medLabel(o.med))}</b> <span class="muted">${esc(medDesc(o.med))}</span>
             <span class="m-sig">${esc(sig(o))}</span>
             <span class="chips">${m.controlled ? `<span class="chip cs">${m.controlled}</span>` : ''}${o.dose == null ? '<span class="chip">RANGE DOSE</span>' : ''}${m.loc.type === 'Fridge' ? '<span class="chip fridge">REFRIGERATED</span>' : ''}</span></span>
           <span class="m-when">${when}</span></button>`;
-      }).join('') : `<p class="empty-line">No ${session.tab === 'due' ? 'medications due now' : session.tab === 'prn' ? 'PRN orders' : 'orders'} for this patient. Try <b>All Orders</b>.</p>`;
+      }).join('') : '<p class="empty-line">No active orders for this patient.</p>';
     } else {
       const meds = Object.keys(F).filter(id => F[id].override).sort((a, b) => F[a].name.localeCompare(F[b].name));
       listHtml = meds.map(id => { const m = F[id]; return `<button class="mrow override-row ${cart.some(c => c.med === id && c.override) ? 'incart' : ''}" data-act="pickOverride" data-id="${id}" data-filterable="${esc(m.name + ' ' + m.brand)}">
@@ -479,8 +472,6 @@ const SCREENS = {
       ${ov ? '<p class="warnline">Override bypasses pharmacist order review. Use it only for emergencies or when the order cannot be verified in time. Striped items are override medications.</p>' : ''}
       <div class="profile">
         <section class="plist">
-          ${!ov ? `<div class="seg small" role="tablist">${[['due', T('due')], ['prn', 'PRN'], ['all', 'All Orders']].map(([k, l]) => `<button class="${session.tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}" role="tab" aria-selected="${session.tab === k}">${l}</button>`).join('')}</div>` : ''}
-          ${!ov ? `<p class="now-line">Now <b class="clock" data-fmt="mil">${clockText(Date.now(), 'mil')}</b> · scheduled doses are on time within 60 minutes of the due time</p>` : ''}
           <input type="search" id="medsearch" placeholder="Type the first 3 letters of the medication" data-filter aria-label="Search medications">
           <div class="mlist">${listHtml}</div>
         </section>
@@ -636,8 +627,7 @@ async function patientAction(action, tab) {
     session.mode = action; session.cart = [];
     const c = patientCounts(p);
     if (isOmni()) session.tab = c.due ? 'sched' : 'active';
-    else if (tab) session.tab = tab;
-    else session.tab = c.due ? 'due' : 'all';
+    else session.tab = 'all';
     go('profile');
   } else if (action === 'kits') { session.cart = []; go('kits'); } else go({ return: 'returns', waste: 'waste', past: 'past' }[action]);
 }
@@ -1681,7 +1671,7 @@ function answerSteps(t) {
     ? [`Select ${nm} → <b>Remove Meds</b> → <b>Stocked Meds</b> tab.`, `Select ${med} → <b>Yes</b> → reason <b>Emergency Situation</b> → OK.`, `Amount to administer <b>${num(t.dose)} ${u}</b> → OK.`, '<b>Remove Now</b> → follow the guiding lights → <b>OK</b>.']
     : [`Select ${nm} → <b>Override</b>.`, `Select ${med}; amount to administer <b>${num(t.dose)} ${u}</b> → OK.`, '<b>Remove Med</b> → reason <b>Emergency / rapid response</b> → Remove Meds.', 'Take it from the lit pocket → <b>Remove &amp; Close Drawer</b>.']);
   const tab = t.tab === 'due' ? (o ? 'Scheduled Meds' : 'Due Now') : t.tab === 'all' ? (o ? 'Active Med Orders' : 'All Orders') : (o ? 'PRN Only' : 'PRN');
-  const out = s.concat(o ? [`Select ${nm} → <b>Remove Meds</b>.`, `<b>${tab}</b> tab → select ${med}.`] : [`My Patients → select ${nm} → <b>Remove</b>.`, `<b>${tab}</b> tab → select ${med}.`]);
+  const out = s.concat(o ? [`Select ${nm} → <b>Remove Meds</b>.`, `<b>${tab}</b> tab → select ${med}.`] : [`My Patients → select ${nm} → <b>Remove</b>.`, `Select ${med} from the patient's medication list.`]);
   out.push(t.range ? `Amount to administer: <b>${num(t.dose)} ${u}</b>.` : o ? 'Confirm the intended dose → <b>OK</b>.' : `It moves to Selected Meds.`);
   if (o) { out.push('<b>Remove Now</b> → open the lit bin, take the item → <b>OK</b>.'); if (F[t.med].controlled) out.push('Countback: enter the quantity <b>remaining</b> in the bin.'); }
   else { out.push('<b>Remove Med</b>.'); if (F[t.med].controlled) out.push('Blind count: count what is in the pocket <b>before</b> removing.'); out.push('<b>Remove &amp; Close Drawer</b>.'); }
@@ -1789,7 +1779,6 @@ function renderCoach() {
       <label class="check"><input type="checkbox" data-cact="haptics" ${db.settings.haptics === false ? '' : 'checked'}> <span><b>Vibration (haptics)</b><br><span class="muted small">Short vibrations on taps, fingerprint scans, drawers and alerts. Works on most Android phones and tablets; iPhone and iPad browsers do not allow it.</span></span></label>
       <div class="coach-btns"><button class="btn small" data-cact="resetScore">Reset my score</button><button class="btn small danger" data-cact="resetAll">Reset everything</button></div></details>
     <details class="coach-sec"><summary>Key symbols</summary><ul class="small keys">
-      <li><span class="dot mini"></span> Blue dot — medication due now</li><li><span class="dot mini past"></span> Orange — past due</li>
       <li><span class="stripes mini"></span> Striped — override medication</li><li><span class="ind ind-waste">W</span> Undocumented waste</li><li><span class="ind ind-disc">Δ</span> Discrepancy on the device</li></ul></details>`;
   coach.innerHTML = html;
 }

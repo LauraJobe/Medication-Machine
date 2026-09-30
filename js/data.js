@@ -146,14 +146,14 @@ const SCENARIOS = [
     steps: [
       { text: 'Sign in', hint: 'Type <b>student</b>, then hold your finger on the fingerprint scanner.', match: e => e.type === 'signin' },
       { text: 'Select Harold Jenkins and choose <b>Remove</b>', hint: 'My Patients or All Available Patients → tap Jenkins → Remove.', match: e => e.type === 'patient_action' && e.patient === 'P1' && e.action === 'remove' },
-      { text: 'Remove digoxin 0.125 mg (1 tab) and close the drawer', hint: 'Select digoxin on the Due Now tab, then Remove Med.', match: e => e.type === 'removed' && e.med === 'digoxin_tab' && e.patient === 'P1' },
+      { text: 'Remove digoxin 0.125 mg (1 tab) and close the drawer', hint: 'Select digoxin in Harold Jenkins\' medication list, then Remove Med.', match: e => e.type === 'removed' && e.med === 'digoxin_tab' && e.patient === 'P1' },
       { text: 'Sign out', match: e => e.type === 'signout' },
     ] },
   { id: 's3', title: 'Controlled substance: remove + waste the partial dose', level: 'Intermediate', patient: 'P1',
     brief: '<b>Harold Jenkins</b> is asking for pain medicine. He has an order for <b>morphine 2 mg IV q4h PRN severe pain</b>. The unit stocks morphine <b>4 mg/1 mL</b> Carpujects. Remove the dose, count accurately, and waste the unused 2 mg with a witness.',
     steps: [
       { text: 'Sign in and open Jenkins → <b>Remove</b>', match: e => e.type === 'patient_action' && e.patient === 'P1' && e.action === 'remove' },
-      { text: 'Perform an accurate <b>blind count</b> of the MiniDrawer pocket', hint: 'Select morphine on the PRN tab, then count the Carpujects you see in the open pocket BEFORE removing one. The number changes every time.', match: e => e.type === 'count' && e.med === 'morphine_inj' && e.correct },
+      { text: 'Perform an accurate <b>blind count</b> of the MiniDrawer pocket', hint: 'Select morphine, then count the Carpujects you see in the open pocket BEFORE removing one. The number changes every time.', match: e => e.type === 'count' && e.med === 'morphine_inj' && e.correct },
       { text: 'Remove 1 Carpuject (4 mg)', match: e => e.type === 'removed' && e.med === 'morphine_inj' && e.patient === 'P1' },
       { text: 'Choose <b>Waste Now</b> and waste <b>2 mg (0.5 mL)</b> with a witness', hint: '4 mg removed − 2 mg dose = 2 mg waste. 2 mg ÷ 4 mg/mL = 0.5 mL.', match: e => e.type === 'waste' && e.med === 'morphine_inj' && Math.abs(e.amount - 2) < 0.001 },
       { text: 'Sign out', match: e => e.type === 'signout' },

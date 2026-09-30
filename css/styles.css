@@ -105,16 +105,15 @@ button { font: inherit; }
 
 /* patient table */
 .ptable { background: var(--s-card); border: 1px solid var(--s-line); border-radius: 8px; overflow: hidden; }
-.phead, .prow { display: grid; grid-template-columns: minmax(0, 1fr) 76px 70px 60px 76px; align-items: center; }
+.phead, .prow-main { display: grid; grid-template-columns: minmax(0, 1fr) 110px 90px; align-items: center; gap: 8px; }
 .phead { background: #e9eef3; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--s-muted); padding: 7px 12px; }
-.prow { border-top: 1px solid var(--s-line); padding-right: 12px; }
-.prow.pastdue { box-shadow: inset 5px 0 0 var(--s-orange); }
+.prow { border-top: 1px solid var(--s-line); }
 .prow.sel { background: var(--s-sel); }
-.prow-main { grid-column: span 2; display: grid; grid-template-columns: minmax(0, 1fr) 76px; align-items: center; gap: 8px; border: 0; background: transparent; text-align: left; padding: 11px 12px; cursor: pointer; color: var(--s-ink); min-height: 56px; }
+.prow-main { width: 100%; border: 0; background: transparent; text-align: left; padding: 11px 12px; cursor: pointer; color: var(--s-ink); min-height: 56px; }
 .pr-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pr-name b { font-size: 16px; }
 .pr-title { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
-.pr-room { font-weight: 600; }
+.pr-room, .pr-visit { font-weight: 600; font-size: 14px; }
 .rm-inline { display: none; }
 .pr-col { display: flex; justify-content: center; }
 .dot { width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--s-due); color: #fff; font-weight: 700; cursor: pointer; font-family: var(--f-mono); font-size: 13px; }
@@ -501,10 +500,9 @@ label
   .content { padding: 12px; }
   .actionbar { padding: 8px; gap: 6px; }
   .actionbar .btn { flex: 1 1 auto; padding: 8px 10px; }
-  .phead, .prow { grid-template-columns: minmax(0, 1fr) 46px 46px 50px; }
-  .phead > span:nth-child(2), .pr-room { display: none; }
-  .prow-main { grid-column: span 1; grid-template-columns: minmax(0, 1fr); padding: 10px; }
-  .prow { padding-right: 6px; }
+  .phead, .prow-main { grid-template-columns: minmax(0, 1fr); }
+  .phead > span:not(:first-child), .pr-room, .pr-visit { display: none; }
+  .prow-main { padding: 10px; }
   .rm-inline { display: inline; }
   .seg { display: flex; }
   .seg button { flex: 1 1 0; padding-inline: 8px; }
