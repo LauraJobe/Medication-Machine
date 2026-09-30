@@ -186,7 +186,7 @@ const SCENARIOS = [
 
 
 /* Cabinet profiles. Both are patient-first. The Omnicell profile follows the Omnicell
- * Color Touch 22.5 user guide (Remove Meds / Return Meds / Waste Meds, countback, PMAs). */
+ * Color Touch 22.5 user guide (Remove Meds / Return Meds / Waste Meds, PMAs). */
 const DEVICES = {
   pyxis: {
     key: 'pyxis', name: 'MedStation', model: 'Pyxis-style MedStation ES', station: '4W-MAIN', actionFirst: false,
@@ -207,12 +207,12 @@ const DEVICES = {
 // Omnicell Color Touch lists (from the 22.5 user guide screens)
 const OMNI_OVERRIDE_REASONS = ['Emergency Situation', 'MD Order', 'Patient Condition', 'Pharmacy Not Available'];
 const OMNI_WASTE_REASONS = ['Partial dose — remainder of package', 'Patient refused after preparation', 'Dropped / contaminated', 'Order changed or discontinued'];
-const OMNI_RESOLVE_REASONS = ['Miscount at countback (my error)', 'Previous user miscount — bin level corrected by cycle count', 'Removed more or less than indicated on screen (verified on MAR)', 'Item found in wrong bin or return bin', 'Unable to resolve — incident report filed, charge nurse notified'];
+const OMNI_RESOLVE_REASONS = ['Miscount at blind count (my error)', 'Previous user miscount — bin level corrected by cycle count', 'Removed more or less than indicated on screen (verified on MAR)', 'Item found in wrong bin or return bin', 'Unable to resolve — incident report filed, charge nurse notified'];
 
 // Debrief shown when a guided scenario is finished (or on request).
 const DEBRIEFS = {
   s2: 'Remove scheduled medications within the administration window and only from the pharmacist-verified profile. Check the rights of medication administration against the eMAR, and complete any assessment the drug requires (for digoxin, an apical pulse) in the EMR before you give it.',
-  s3: 'Controlled substances need a blind count (Pyxis) or countback (Omnicell) and any unused portion must be wasted in front of a licensed witness who watches the whole waste. Math: 4 mg − 2 mg = 2 mg to waste; 2 mg ÷ 4 mg/mL = 0.5 mL.',
+  s3: 'Controlled substances need a blind count before removal and any unused portion must be wasted in front of a licensed witness who watches the whole waste. Math: 4 mg − 2 mg = 2 mg to waste; 2 mg ÷ 4 mg/mL = 0.5 mL.',
   s5: 'Override is for emergencies or when pharmacist review would delay urgent care. After naloxone, stay with the patient and reassess often, because naloxone can wear off before the opioid does. Two patients with similar names need two identifiers every time.',
   s13: 'A nurse-prepared order bundles the drug and its diluent so you get both. Reconstitute exactly as directed, label the syringe, and do not substitute a different diluent. Skipping a component creates a partial issue.',
   s18: 'Select every due medication for a patient before you start removing: the cabinet then guides you drawer to drawer in one transaction, which saves time and reduces the chance of forgetting a dose.',

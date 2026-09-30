@@ -21,7 +21,7 @@ Switch at the top of the **Practice Coach**. Patients, medications and scenarios
 | Log on | Touch screen → User ID → fingerprint (or password) | "Welcome! Please Enter:" User ID + fingerprint (hold about 2 s) or password |
 | Home | My Patients / All Available Patients (non-profile style: Name, Visit ID, Location; no due markers) | Patient list: Global / Local / Partial Dose / My Patients tabs; Main Menu |
 | Taking meds out | Patient → **Remove** → that patient's med list (no due times; check the MAR) | Patient → **Remove Meds** → Scheduled Meds / PRN Only / Active / Inactive / Stocked Meds → **Remove Now** |
-| Controlled count | **Blind count** before removing | **Countback** (quantity remaining) after removing |
+| Controlled count | **Blind count** before removing | **Blind count** (quantity in bin) before removing |
 | Override | Override → reason at Remove Med | **Stocked Meds** tab → "Do you wish to override?" → reason |
 | Waste | Waste Now / Waste Later | **Waste Partial Dose** or Close Bin → Partial Dose List → Waste Meds |
 | Log off | Sign Out | **Exit** |

@@ -38,15 +38,10 @@ const D = () => DEVICES[(db && db.settings.device) || 'pyxis'] || DEVICES.pyxis;
 const T = k => D().L[k];
 const OMNI_TEXT = [
   [/Waste Later &amp; resolve undocumented waste|Waste Later & resolve undocumented waste/g, 'Partial dose: waste it later from the Partial Dose List'],
-  [/Blind count discrepancy/g, 'Countback discrepancy'],
-  [/Perform an accurate <b>blind count<\/b> of the MiniDrawer pocket/g, 'Remove 1 Carpuject, then enter an accurate <b>countback</b> (quantity remaining in the FlexBin)'],
-  [/^Remove 1 Carpuject \(4 mg\)$/g, 'Press OK to finish the removal (1 Carpuject = 4 mg)'],
-  [/Blind count and remove 1 Carpuject/g, 'Remove 1 Carpuject and complete the countback'],
   [/remove \+ Waste Now/g, 'remove + Waste Partial Dose'],
   [/Remove on <b>Override<\/b>\./g, 'Override it from the <b>Stocked Meds</b> tab.'],
   [/From Home, open <b>Discrepancies<\/b> and resolve with a recount, reason and witness/g, 'Press Main Menu → <b>Resolve Discrep</b>; use Cycle Count, a resolution reason and a witness'],
   [/Recount, pick the matching reason, add a comment, and have your witness co-sign\./g, 'Press Cycle Count, pick a reason from List of Resolve Reasons, press Resolve Discrep, and have your witness sign.'],
-  [/Count the Carpujects you see in the open pocket BEFORE removing one\./g, 'Omnicell uses a countback: after you remove one, enter the quantity remaining in the bin.'],
   [/Emergency \/ rapid response is the appropriate reason\./g, 'Emergency Situation is the appropriate reason.'],
   [/Home → My Patients → Edit/g, 'Patient list → My Patients tab → Edit My Patients'],
   [/From Home, open/g, 'From the patient list, open'],
@@ -54,7 +49,7 @@ const OMNI_TEXT = [
   [/→ <b>Remove<\/b>/g, '→ <b>Remove Meds</b>'], [/<b>Remove<\/b>/g, '<b>Remove Meds</b>'], [/→ Remove\b/g, '→ Remove Meds'],
   [/<b>Return<\/b>/g, '<b>Return Meds</b>'], [/→ Waste\b/g, '→ Waste Meds'], [/<b>PRN<\/b> tab/g, '<b>PRN Only</b> tab'],
   [/<b>Undocumented Waste<\/b>/g, 'the <b>Partial Dose List</b> tab'], [/undocumented waste/gi, 'partial dose waste'],
-  [/All Available Patients/g, 'Local List'], [/<b>blind count<\/b>/g, '<b>countback</b>'], [/blind count/gi, 'countback'],
+  [/All Available Patients/g, 'Local List'],
   [/MiniDrawer pocket/g, 'FlexBin'], [/MiniDrawer/g, 'FlexBin'], [/the pocket/g, 'the bin'],
   [/<b>Waste Now<\/b>/g, '<b>Waste Partial Dose</b>'], [/Waste Now/g, 'Waste Partial Dose'], [/<b>Waste Later<\/b>/g, '<b>Close Bin</b> without wasting'], [/Waste Later/g, 'Close Bin without wasting'],
   [/Sign out of the MedStation/g, 'Press Exit to log off'], [/Sign out/g, 'Press Exit to log off'], [/sign out/g, 'press Exit to log off'], [/Sign in/g, 'Log on'], [/sign in/g, 'log on'],
@@ -1008,7 +1003,7 @@ async function resolveDiscrepancy(d) {
  * Omnicell Color Touch mode — follows the Omnicell Color Touch 22.5 user guide:
  * log on (User ID + password or fingerprint, Short List), patient lists
  * (Global / Local / Partial Dose / My Patients), patient screen, Remove Meds tabs,
- * Stocked Meds override, countback (quantity remaining), Waste Partial Dose,
+ * Stocked Meds override, blind count before removing, Waste Partial Dose,
  * Return Meds / Waste Meds with Patient Medication Accounts, Resolve Discrep.
  * ===================================================================== */
 const isOmni = () => D().key === 'omnicell';
@@ -1223,7 +1218,7 @@ async function omniSignIn() {
   go('patients', { listTab: (db.myPatients[user.id] || []).length ? 'my' : 'local', sel: null });
 }
 
-/* ---------- Omnicell remove / countback ---------- */
+/* ---------- Omnicell remove / blind count ---------- */
 async function omniConfirmQty(medId, dose) {
   const m = F[medId], q = cartItem(medId, dose, {}).qty;
   const r = await modal({ title: `${esc(medLabel(medId))}`, body: `<p>${esc(medDesc(medId))}</p><dl class="facts"><dt>Intended Dose:</dt><dd><b>${num(dose)} ${m.unit.toUpperCase()}</b></dd><dt>Quantity to Remove:</dt><dd><b>${q} ${unitWord(medId, q)}</b></dd></dl>`,
@@ -1267,6 +1262,31 @@ async function omniSelectStocked(medId) {
 async function omniRemoveItem(p, it) {
   const m = F[it.med], who = `${esc(p.last)}, ${esc(p.first)}`;
   if (db.physical[it.med] < it.qty) { await info('Insufficient Quantity', `<p>There are not enough ${esc(medLabel(it.med))} in this bin. Press <b>Find Item</b> to check availability in other cabinets, and notify pharmacy.</p>`); return null; }
+  let countNote = '';
+  if (m.controlled) {
+    // Blind count: the nurse counts what is in the bin BEFORE taking anything out.
+    let attempts = 0;
+    for (;;) {
+      const c = await step({ title: `Removing Meds for ${who}`, body: `${drawerView(it.med, { contents: 'items' })}
+          <div class="count-box"><label for="count">Count every ${unitWord(it.med, 1)} in the open bin <b>before</b> you remove anything. Quantity in Bin:</label>
+          <div class="inline"><input id="count" type="number" inputmode="numeric" min="0"><span>EA</span></div></div>`,
+        hint: 'Blind count: follow the guiding lights to the open bin, count the quantity in the bin before removing, then press OK.',
+        buttons: [{ label: 'Skip Item', value: 'skip', novalidate: true }, { label: 'OK', value: 'ok', primary: true }],
+        validate: (v, d) => d.count === '' || isNaN(parseInt(d.count, 10)) ? 'Enter the quantity in the bin.' : null });
+      if (c.value !== 'ok') return null;
+      const n = parseInt(c.data.count, 10), sys = db.inventory[it.med], phys = db.physical[it.med];
+      if (n === sys) { emit('count', { med: it.med, correct: n === phys }); break; }
+      if (++attempts === 1) { await info('Recount', '<p>The quantity you entered does not match the expected quantity. Count the bin again, one item at a time.</p>', 'Recount'); continue; }
+      db.discrepancies.push({ id: uid(), t: Date.now(), med: it.med, user: session.user, patient: p.id, expected: sys, counted: n, resolved: false });
+      addTx({ type: 'Discrepancy', patient: p.id, med: it.med, amount: `exp ${sys} / cnt ${n}`, note: 'Blind count mismatch' });
+      db.inventory[it.med] = n;
+      emit('count', { med: it.med, correct: n === phys });
+      emit('discrepancy_created', { med: it.med });
+      countNote = 'Discrepancy created at the blind count — press Main Menu → Resolve Discrep before the end of your shift.';
+      await info('<span class="alert-title">Discrepancy</span>', `<p>Your second count (<b>${n}</b>) does not match the quantity the cabinet expected. A discrepancy has been created.</p><p>You may continue this removal. The <b>Resolve Discrep</b> button is now active; resolve it by the end of your shift.</p>`, 'OK', 'alert');
+      break;
+    }
+  }
   const r = await step({ title: `Removing Meds for ${who}`, body: `${drawerView(it.med, { contents: m.controlled ? 'items' : 'label' })}
       <div class="take"><div class="take-n">${it.qty}</div><div><b>Remove ${it.qty} ${unitWord(it.med, it.qty)}</b> of ${esc(medLabel(it.med))} ${esc(medDesc(it.med))}<br><span class="muted">Intended dose: ${num(it.dose)} ${m.unit}${it.override ? ' · OVERRIDE' : ''}</span></div></div>`,
     hint: 'Follow the guiding lights. Open the drawer with the blinking green LED, open the lit bin and remove the item. Press OK when you have removed it.',
@@ -1279,24 +1299,6 @@ async function omniRemoveItem(p, it) {
     return null;
   }
   db.inventory[it.med] -= it.qty; db.physical[it.med] -= it.qty;
-  let countNote = '';
-  if (m.controlled) {
-    const c = await step({ title: `Removing Meds for ${who}`, body: `${drawerView(it.med, { contents: 'items' })}
-        <div class="count-box"><dl class="facts"><dt>Quantity Removed:</dt><dd><b>${it.qty} EA</b></dd></dl><label for="count">Quantity Remaining:</label><div class="inline"><input id="count" type="number" inputmode="numeric" min="0"><span>EA</span></div></div>`,
-      hint: 'Countback: enter the correct quantity remaining in the bin after removing the med(s).',
-      buttons: [{ label: 'OK', value: 'ok', primary: true }],
-      validate: (v, d) => d.count === '' || isNaN(parseInt(d.count, 10)) ? 'Enter the quantity remaining in the bin.' : null });
-    const n = parseInt(c.data.count, 10), sys = db.inventory[it.med], phys = db.physical[it.med];
-    emit('count', { med: it.med, correct: n === phys });
-    if (n !== sys) {
-      db.discrepancies.push({ id: uid(), t: Date.now(), med: it.med, user: session.user, patient: p.id, expected: sys, counted: n, resolved: false });
-      addTx({ type: 'Discrepancy', patient: p.id, med: it.med, amount: `exp ${sys} / found ${n}`, note: 'Countback mismatch' });
-      db.inventory[it.med] = n;
-      emit('discrepancy_created', { med: it.med });
-      countNote = 'Discrepancy created at countback — press Main Menu → Resolve Discrep before the end of your shift.';
-      await info('<span class="alert-title">Discrepancy</span>', `<p>The quantity remaining you entered (<b>${n}</b>) does not match the quantity the cabinet expected. A discrepancy has been created.</p><p>The <b>Resolve Discrep</b> button is now active. Resolve it by the end of your shift.</p>`, 'OK', 'alert');
-    }
-  }
   return afterRemoval(p, it, null, countNote);
 }
 
@@ -1642,7 +1644,7 @@ function evalTask(t, ev, held) {
     ? { label: 'Removed on override', want: 'Override with a reason', got: r ? (r.override ? 'Override' : 'Patient profile') : '—', ok: !!r && r.override }
     : { label: 'Used the verified order', want: 'From the patient profile', got: r ? (r.override ? 'Override (an order already exists)' : 'Patient profile') : '—', ok: !!r && !r.override });
   if (F[t.med].controlled) { const c = ev.filter(e => e.type === 'count' && e.med === t.med), okc = c.length > 0 && c.every(x => x.correct);
-    items.push({ label: isOmni() ? 'Countback' : 'Blind count', want: 'Accurate count', got: c.length ? (okc ? 'Accurate' : 'Did not match the drawer') : 'Not done', ok: okc }); }
+    items.push({ label: 'Blind count', want: 'Accurate count', got: c.length ? (okc ? 'Accurate' : 'Did not match the drawer') : 'Not done', ok: okc }); }
   const w = taskWaste(t);
   if (w > 1e-6) { const we = ev.filter(e => e.type === 'waste' && e.med === t.med), tot = we.reduce((n, x) => n + x.amount, 0);
     items.push({ label: 'Waste with a witness', want: amtText(t.med, w), got: we.length ? amtText(t.med, tot) : 'Not documented (left for later)', ok: we.length > 0 && Math.abs(tot - w) < 1e-6 }); }
@@ -1673,7 +1675,7 @@ function answerSteps(t) {
   const tab = t.tab === 'due' ? (o ? 'Scheduled Meds' : 'Due Now') : t.tab === 'all' ? (o ? 'Active Med Orders' : 'All Orders') : (o ? 'PRN Only' : 'PRN');
   const out = s.concat(o ? [`Select ${nm} → <b>Remove Meds</b>.`, `<b>${tab}</b> tab → select ${med}.`] : [`My Patients → select ${nm} → <b>Remove</b>.`, `Select ${med} from the patient's medication list.`]);
   out.push(t.range ? `Amount to administer: <b>${num(t.dose)} ${u}</b>.` : o ? 'Confirm the intended dose → <b>OK</b>.' : `It moves to Selected Meds.`);
-  if (o) { out.push('<b>Remove Now</b> → open the lit bin, take the item → <b>OK</b>.'); if (F[t.med].controlled) out.push('Countback: enter the quantity <b>remaining</b> in the bin.'); }
+  if (o) { out.push('<b>Remove Now</b> → follow the guiding lights to the open bin.'); if (F[t.med].controlled) out.push('Blind count: count the quantity in the bin <b>before</b> removing → <b>OK</b>.'); out.push('Take the item → <b>OK</b>.'); }
   else { out.push('<b>Remove Med</b>.'); if (F[t.med].controlled) out.push('Blind count: count what is in the pocket <b>before</b> removing.'); out.push('<b>Remove &amp; Close Drawer</b>.'); }
   if (w > 1e-6) out.push(o ? `<b>Waste Partial Dose</b>: Administration ${num(t.dose)}, Waste <b>${num(w)} ${u}</b>, pick a reason → witness <b>kjones</b> / <b>pyxis1</b>.` : `<b>Waste Now</b>: waste <b>${amtText(t.med, w)}</b> → witness <b>kjones</b> / <b>pyxis1</b>.`);
   return out;
@@ -1686,7 +1688,7 @@ function describe(e) {
     case 'signout': return 'Signed out';
     case 'patient_action': return `${p(e.patient)} → ${esc(({ remove: T('remove'), override: 'Override', return: 'Return', waste: 'Waste', past: T('past'), kits: 'Kits' })[e.action] || e.action)}`;
     case 'dose_entered': return `Amount to administer: ${num(e.dose)} ${F[e.med].unit} ${ml(e.med)}`;
-    case 'count': return `${isOmni() ? 'Countback' : 'Blind count'} ${ml(e.med)}: ${e.correct ? 'accurate' : 'did not match the drawer'}`;
+    case 'count': return `Blind count ${ml(e.med)}: ${e.correct ? 'accurate' : 'did not match the drawer'}`;
     case 'removed': return `Removed ${e.qty} ${unitWord(e.med, e.qty)} ${ml(e.med)} for ${p(e.patient)}${e.override ? ' (override)' : ''}`;
     case 'waste': return `Wasted ${amtText(e.med, e.amount)} ${ml(e.med)} — witness ${esc(userName(e.witness))}`;
     case 'waste_later': return `Waste left for later: ${ml(e.med)}`;
@@ -1767,7 +1769,7 @@ function renderCoach() {
   else if (mode === 'scen') html += scenarioHtml();
   else html += `<div class="scen"><h3>Free practice</h3><p class="small">No checklist. Some things to try:</p><ul class="small ideas">
       <li>Sign in with your fingerprint, and once with the password.</li><li>Build My Patients, then remove a scheduled med and a PRN.</li>
-      <li>Remove a controlled substance: ${isOmni() ? 'countback' : 'blind count'}, then waste now or later.</li><li>Override an emergency med; try morphine for Robert Thompson and read the allergy alert.</li>
+      <li>Remove a controlled substance: blind count before removing, then waste now or later.</li><li>Override an emergency med; try morphine for Robert Thompson and read the allergy alert.</li>
       <li>Return an unopened item; remove a kit; add a temporary patient.</li><li>Remove fentaNYL and count carefully — the pocket is one short. Then resolve the discrepancy.</li></ul></div>`;
   html += `<details class="coach-sec" id="histDet"${mode === 'free' || session.histOpen ? ' open' : ''}><summary>Event history</summary>${hist.length ? `<ol class="history">${hist.slice(0, 25).map(h => `<li><span class="mono">${hhmm(h.t)}</span> ${describe(h.e)}</li>`).join('')}</ol>` : '<p class="small muted">Nothing recorded yet.</p>'}</details>
     <details class="coach-sec"><summary>Signing in</summary><ul class="small">
