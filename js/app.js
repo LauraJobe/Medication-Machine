@@ -372,7 +372,7 @@ const SCREENS = {
         <span class="sb-kicker">${D().station} · 4 West Medical-Surgical</span>
         <span class="sb-title">${D().name}</span>
         <span class="sb-sub">Touch the screen to sign in</span>
-        <span class="sb-time mono">${hhmm(Date.now())}</span>
+        <span class="sb-time mono clock" data-fmt="colon">${clockText(Date.now())}</span>
       </button>` };
   },
 
@@ -1030,7 +1030,7 @@ const OMNI = {
         <span class="sb-title">Omnicell XT</span>
         <span class="sb-sub">Touch the screen to log on</span>
         ${disc ? '<span class="sb-disc">Discrepancy exists — press Resolve Discrep after you log on</span>' : ''}
-        <span class="sb-time mono">${hhmm(Date.now())}</span></button>` };
+        <span class="sb-time mono clock" data-fmt="colon">${clockText(Date.now())}</span></button>` };
   },
 
   home() {
@@ -1783,6 +1783,15 @@ function renderCoach() {
     <details class="coach-sec"><summary>Key symbols</summary><ul class="small keys">
       <li><span class="stripes mini"></span> Striped — override medication</li><li><span class="ind ind-waste">W</span> Undocumented waste</li><li><span class="ind ind-disc">Δ</span> Discrepancy on the device</li></ul></details>`;
   coach.innerHTML = html;
+  renderQuickbar(sel);
+}
+// Phones and tablets stack the coach under the cabinet, so the cabinet type and mode are repeated above it.
+function renderQuickbar(sel) {
+  const qb = $('#quickbar'); if (!qb) return;
+  const opt = (v, l) => `<option value="${v}"${sel === v ? ' selected' : ''}>${l}</option>`;
+  qb.innerHTML = `<div class="qb-dev" role="radiogroup" aria-label="Cabinet type">${Object.values(DEVICES).map(d => `<button role="radio" aria-checked="${D().key === d.key}" class="${D().key === d.key ? 'on' : ''}" data-cact="device" data-dev="${d.key}">${d.key === 'pyxis' ? 'Pyxis' : 'Omnicell'}</button>`).join('')}</div>
+    <select id="qbMode" aria-label="Practice mode">${opt('practice', 'Practice: random tasks')}${opt('free', 'Free practice')}<optgroup label="Guided scenarios">${SCENARIOS.map(s => opt(s.id, `${esc(s.level)}: ${esc(devText(s.title).replace(/<[^>]+>/g, ''))}`)).join('')}</optgroup></select>
+    <button class="qb-coach" type="button" data-cact="toCoach">Coach ↓</button>`;
 }
 const nextScen = S => SCENARIOS[SCENARIOS.indexOf(S) + 1];
 function resultHtml(sc, S) {
@@ -1798,7 +1807,7 @@ function setMode(m) {
   if (m === 'practice') newTask();
   else { PX = { task: null, events: [], result: null }; render(); }
 }
-coach.addEventListener('click', e => {
+function coachClick(e) {
   const b = e.target.closest('[data-cact]'); if (!b || b.disabled) return;
   const a = b.dataset.cact;
   if (a === 'start') startScenario(b.dataset.id);
@@ -1811,13 +1820,17 @@ coach.addEventListener('click', e => {
   else if (a === 'debrief') { session.showDebrief = true; renderCoach(); }
   else if (a === 'device') { if (db.settings.device !== b.dataset.dev) { db.settings.device = b.dataset.dev; save(); signOutQuiet(); toast(`Switched to ${D().model}.`); } }
   else if (a === 'toDevice') $('#device').scrollIntoView({ behavior: 'smooth' });
+  else if (a === 'toCoach') $('#coach').scrollIntoView({ behavior: 'smooth' });
   else if (a === 'resetScore') { db.pscore = { correct: 0, total: 0, streak: 0, best: 0 }; save(); renderCoach(); toast('Score reset.'); }
   else if (a === 'resetAll') { db = freshDb(); save(); PX = { task: null, events: [], result: null }; hist.length = 0; setMode('practice'); toast('Everything reset.'); }
   else if (a === 'copyResult') {
     const sc = db.scen, S = scenById(sc.id); const secs = Math.round((sc.end - sc.start) / 1000);
     copyText(`MedStation Practice Simulator — scenario result\nCabinet: ${D().model}\nScenario: ${S.title} (${S.level})\nCompleted: ${new Date(sc.end).toLocaleString()}\nSteps: ${S.steps.length - sc.missed.length}/${S.steps.length}\nMissed: ${sc.missed.map(i => S.steps[i].text.replace(/<[^>]+>/g, '')).join('; ') || 'none'}\nSafety concerns: ${sc.errors.join('; ') || 'none'}\nTime: ${Math.floor(secs / 60)} min ${secs % 60} s`);
   }
-});
+}
+coach.addEventListener('click', coachClick);
+$('#quickbar').addEventListener('click', coachClick);
+$('#quickbar').addEventListener('change', e => { if (e.target.id === 'qbMode') setMode(e.target.value); });
 coach.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'modeSel') setMode(t.value);

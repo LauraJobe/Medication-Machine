@@ -45,7 +45,7 @@ Also in free practice: returns, kits, temporary patients (Add Temporary Patient 
 
 ## Phones and tablets
 
-Large touch targets, no double-tap zoom, a bigger fingerprint scanner, full-width dialog buttons on phones, and **haptics** — short vibrations on taps, fingerprint scans, drawers opening and alerts (Android browsers; iPhone and iPad browsers do not allow vibration). Haptics can be turned off under **Coach → Settings**.
+On phones and tablets the coach sits below the cabinet, so a bar **above the cabinet** repeats the Pyxis / Omnicell switch and the practice mode; **Coach ↓** jumps to the task, scenario checklist and settings. Large touch targets, no double-tap zoom, a bigger fingerprint scanner, full-width dialog buttons on phones, and **haptics** — short vibrations on taps, fingerprint scans, drawers opening and alerts (Android browsers; iPhone and iPad browsers do not allow vibration). Haptics can be turned off under **Coach → Settings**.
 
 ## Running it
 
