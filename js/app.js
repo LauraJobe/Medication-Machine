@@ -64,11 +64,13 @@ const devText = h => D().key === 'omnicell' ? OMNI_TEXT.reduce((t, [a, b]) => t.
 
 /* ---------- persistent state ---------- */
 let db;
+// Pocket counts are random so every count has to be done for real.
+function randomCount(m) { return m.controlled ? 3 + Math.floor(Math.random() * 12) : Math.max(8, m.count - 6 + Math.floor(Math.random() * 12)); }
 function freshPractice(base = db) {
   base.base = Date.now();
   base.inventory = {}; base.physical = {};
-  for (const [id, m] of Object.entries(F)) { base.inventory[id] = m.count; base.physical[id] = m.count + (m.physicalOffset || 0); }
-  base.orders = {}; base.tx = []; base.removals = []; base.discrepancies = []; base.myPatients = {}; base.shortList = []; base.tempPatients = []; base.remote = [];
+  for (const [id, m] of Object.entries(F)) { const n = randomCount(m); base.inventory[id] = n; base.physical[id] = n + (m.physicalOffset || 0); }
+  base.orders = {}; base.tx = []; base.removals = []; base.discrepancies = []; base.myPatients = {}; base.shortList = []; base.tempPatients = [];
   return base;
 }
 function freshDb() { return freshPractice({ v: 1, users: clone(USERS), settings: { challenge: false }, scen: null }); }
@@ -82,8 +84,7 @@ db = load();
 if (!db.settings.device) db.settings.device = 'pyxis';
 if (!db.tempPatients) db.tempPatients = [];
 // Practice passwords never change: always restore the published ones.
-for (const [id, u] of Object.entries(USERS)) db.users[id] = { ...(db.users[id] || u), password: u.password, mustChange: false };
-if (!db.remote) db.remote = [];
+for (const [id, u] of Object.entries(USERS)) db.users[id] = { ...(db.users[id] || u), password: u.password, bioid: true, mustChange: false };
 if (Date.now() - db.base > 10 * HOUR) { db.base = Date.now(); db.orders = {}; }
 
 const session = { user: null, screen: 'standby', listTab: 'my', sel: null, mode: 'remove', tab: 'due', cart: [], reportAll: false };
@@ -120,7 +121,6 @@ function startScenario(id) {
   const S = scenById(id);
   if (S.device && db.settings.device !== S.device) { db.settings.device = S.device; toast(`This scenario uses the ${DEVICES[S.device].model} cabinet — switched for you.`); }
   freshPractice();
-  if (id === 's1') Object.assign(db.users.student, { bioid: false, deviceCred: null });
   // Later scenarios assume the student already has My Patients set up.
   if (id !== 's1') db.myPatients.student = ['P1', 'P2', 'P3', 'P4'];
   db.scen = { id, step: 0, missed: [], errors: [], start: Date.now(), done: false };
@@ -156,11 +156,13 @@ function cancelFlows() { pend.length = 0; overlay.hidden = true; overlay.innerHT
 function btns(list) {
   return list.map(b => `<button type="button" class="btn ${b.cls || (b.primary ? 'primary' : '')}" data-resolve="${esc(b.value)}"${b.primary ? ' data-primary' : ''}${b.novalidate ? ' data-novalidate' : ''}${b.disabled ? ' disabled' : ''}>${b.label}</button>`).join('');
 }
-function modal({ title, body, buttons, validate, cls = '' }) {
+function modal({ title, body, buttons, validate, cls = '', after }) {
   overlay.innerHTML = `<div class="modal ${cls}" role="dialog" aria-modal="true" aria-labelledby="mtitle"><h2 id="mtitle">${title}</h2><div class="modal-body">${body}</div><div class="err" role="alert" hidden></div><div class="modal-btns">${btns(buttons)}</div></div>`;
   overlay.hidden = false;
   const first = overlay.querySelector('input:not([type=radio]):not([type=hidden]), select, textarea') || overlay.querySelector('[data-primary]');
   if (first) setTimeout(() => first.focus(), 30);
+  if (/\balert\b/.test(cls)) buzz([60, 50, 60]);
+  if (after) after();
   return waitIn(overlay, validate).then(r => { overlay.hidden = true; overlay.innerHTML = ''; return r; });
 }
 function step({ title, body, buttons, validate, after, left = '', tabs = '', hint = '' }) {
@@ -168,6 +170,7 @@ function step({ title, body, buttons, validate, after, left = '', tabs = '', hin
   titlebar.innerHTML = titleHtml(title);
   sidel.innerHTML = left; tabsbar.innerHTML = tabs; hintbar.innerHTML = hint;
   content.innerHTML = body + '<div class="err" role="alert" hidden></div>';
+  if (body.includes('drawer-view')) buzz([20, 40, 20]);
   content.scrollTop = 0;
   actionbar.innerHTML = btns(buttons);
   topbar.innerHTML = renderTopbar();
@@ -178,6 +181,11 @@ function step({ title, body, buttons, validate, after, left = '', tabs = '', hin
 }
 const info = (title, body, label = 'OK', cls = '') => modal({ title, body, cls, buttons: [{ label, value: 'ok', primary: true }] });
 
+/* Haptics: short vibrations on phones/tablets that support them (Android browsers; iPhone Safari ignores this). */
+function buzz(pattern = 10) {
+  if (db && db.settings && db.settings.haptics === false) return;
+  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch {}
+}
 function toast(msg, kind = '', onClick) {
   const t = document.createElement('div');
   t.className = 'toast ' + kind; t.textContent = msg; t.setAttribute('role', 'status');
@@ -192,6 +200,7 @@ function toast(msg, kind = '', onClick) {
 
 /* ---------- global event delegation ---------- */
 document.addEventListener('click', e => {
+  if (e.target.closest('button:not(:disabled), .btn')) buzz(8);
   const r = e.target.closest('[data-resolve]');
   if (r && !r.disabled) {
     const p = [...pend].reverse().find(p => p.root.contains(r));
@@ -237,45 +246,21 @@ function scannerHtml(msg) {
     <p class="scan-msg">${msg}</p><button type="button" hidden data-resolve="scan-ok" data-novalidate></button><button type="button" hidden data-resolve="scan-fail" data-novalidate></button></div>`;
 }
 let scanTimer = null;
-function finishScan(el) { el.classList.remove('pressing'); el.classList.add('ok'); setTimeout(() => el.closest('.scanner-wrap')?.querySelector('[data-resolve="scan-ok"]')?.click(), 350); }
+function finishScan(el) { buzz([30, 50, 30]); el.classList.remove('pressing'); el.classList.add('ok'); setTimeout(() => el.closest('.scanner-wrap')?.querySelector('[data-resolve="scan-ok"]')?.click(), 350); }
 document.addEventListener('pointerdown', e => {
   const s = e.target.closest('[data-scanner]'); if (!s || s.classList.contains('ok')) return;
-  e.preventDefault(); s.classList.add('pressing');
+  e.preventDefault(); s.classList.add('pressing'); buzz(15);
   scanTimer = setTimeout(() => { scanTimer = null; finishScan(s); }, D().key === 'omnicell' ? 2000 : 1400);
 });
 const liftFinger = () => {
   const s = document.querySelector('[data-scanner].pressing'); if (!s || !scanTimer) return;
-  clearTimeout(scanTimer); scanTimer = null; s.classList.remove('pressing');
+  clearTimeout(scanTimer); scanTimer = null; s.classList.remove('pressing'); buzz(120);
   s.closest('.scanner-wrap')?.querySelector('[data-resolve="scan-fail"]')?.click();
 };
 document.addEventListener('pointerup', liftFinger);
 document.addEventListener('pointercancel', liftFinger);
 document.addEventListener('contextmenu', e => { if (e.target.closest('[data-scanner]')) e.preventDefault(); });
 
-/* ---------- device biometrics (WebAuthn platform authenticator) ---------- */
-const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
-const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
-const rand = n => crypto.getRandomValues(new Uint8Array(n));
-const DeviceBio = {
-  async available() {
-    try { return !!(window.PublicKeyCredential && window.isSecureContext && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch { return false; }
-  },
-  async register(u) {
-    const cred = await navigator.credentials.create({ publicKey: {
-      challenge: rand(32), rp: { name: 'MedStation Practice Simulator' },
-      user: { id: new TextEncoder().encode(u.id), name: u.id, displayName: `${u.first} ${u.last}` },
-      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
-      timeout: 60000, attestation: 'none' } });
-    return b64(cred.rawId);
-  },
-  async verify(credId) {
-    await navigator.credentials.get({ publicKey: { challenge: rand(32), allowCredentials: [{ type: 'public-key', id: unb64(credId), transports: ['internal', 'hybrid'] }], userVerification: 'required', timeout: 60000 } });
-    return true;
-  },
-};
-let deviceBioOk = false;
-DeviceBio.available().then(v => { deviceBioOk = v; });
 
 /* ---------- screen chrome ---------- */
 function titleHtml(t) { return t ? `<h1>${t}</h1>` : ''; }
@@ -404,7 +389,6 @@ const SCREENS = {
         ${tile('go', 'disc', 'Discrepancies', disc ? `${disc} unresolved` : 'None open', disc ? 'danger' : '', disc ? `<span class="badge red">${disc}</span>` : '')}
         ${tile('go', 'find', T('find'), 'Locate any medication')}
         ${tile('go', 'reports', 'Reports', 'Activity by user or patient')}
-        ${tile('go', 'prefs', T('prefs'), 'Password & BioID')}
       </div>` };
   },
 
@@ -470,7 +454,7 @@ const SCREENS = {
         return `<button class="mrow ${inCart ? 'incart' : ''} ${s.kind}" data-act="pickOrder" data-id="${o.id}" data-filterable="${esc(m.name + ' ' + m.brand)}">
           <span class="m-name"><b>${esc(medLabel(o.med))}</b> <span class="muted">${esc(medDesc(o.med))}</span>
             <span class="m-sig">${esc(sig(o))}</span>
-            <span class="chips">${m.controlled ? `<span class="chip cs">${m.controlled}</span>` : ''}${o.dose == null ? '<span class="chip">RANGE DOSE</span>' : ''}${m.loc.type === 'Fridge' ? '<span class="chip fridge">REFRIGERATED</span>' : ''}${m.cdc ? '<span class="chip">CDC</span>' : ''}</span></span>
+            <span class="chips">${m.controlled ? `<span class="chip cs">${m.controlled}</span>` : ''}${o.dose == null ? '<span class="chip">RANGE DOSE</span>' : ''}${m.loc.type === 'Fridge' ? '<span class="chip fridge">REFRIGERATED</span>' : ''}</span></span>
           <span class="m-when">${when}</span></button>`;
       }).join('') : `<p class="empty-line">No ${session.tab === 'due' ? 'medications due now' : session.tab === 'prn' ? 'PRN orders' : 'orders'} for this patient. Try <b>All Orders</b>.</p>`;
     } else {
@@ -563,14 +547,6 @@ const SCREENS = {
       footer: `<button class="btn" data-act="home">Home</button><button class="btn" data-act="copyReport">Copy Report</button>${inFrame ? '' : '<button class="btn" data-act="print">Print</button>'}` };
   },
 
-  prefs() {
-    const u = db.users[session.user];
-    return { title: T('prefs'), body: `<div class="prefs">
-      <div class="pref"><div><b>BioID fingerprint</b><span class="muted">${u.bioid ? 'Registered.' : 'Not registered.'} Re-register if you injure the finger you enrolled.</span></div><button class="btn" data-act="regBio">${u.bioid ? 'Change BioID' : 'Register BioID'}</button></div>
-      <div class="pref"><div><b>This device's fingerprint / Face ID</b><span class="muted">${u.deviceCred ? 'Linked on this device.' : deviceBioOk ? 'Available on this device.' : 'Not available in this browser. Use the simulated BioID scanner.'}</span></div>
-        ${u.deviceCred ? '<button class="btn" data-act="unlinkDevice">Unlink</button>' : `<button class="btn" data-act="linkDevice"${deviceBioOk ? '' : ' disabled'}>Link Device</button>`}</div>
-    </div>`, footer: `<button class="btn" data-act="home">Home</button>` };
-  },
 };
 
 function txTable(list, showPatient = true) {
@@ -630,9 +606,6 @@ const ACT = {
   report: ds => { session.reportAll = ds.all === '1'; render(); },
   print: () => window.print(),
   copyReport: () => copyText(reportText()),
-  regBio: () => registerBioFlow(db.users[session.user]).then(() => go('prefs')),
-  linkDevice: async () => { await linkDevice(db.users[session.user]); go('prefs'); },
-  unlinkDevice: () => { db.users[session.user].deviceCred = null; save(); toast('Device biometrics unlinked.'); go('prefs'); },
 };
 
 function signOut() {
@@ -677,7 +650,7 @@ async function signInFlow() {
     break;
   }
   let method = null;
-  if (user.bioid || user.deviceCred) method = await bioLogin(user);
+  if (user.bioid) method = await bioLogin(user);
   if (method === 'cancel') return go('standby');
   if (!method || method === 'password') {
     const ok = await passwordLogin(user);
@@ -701,16 +674,12 @@ async function passwordLogin(user) {
 }
 
 async function bioLogin(user) {
-  let fails = 0, msg = 'Place your enrolled finger squarely on the scanner and press firmly. <b>Press and hold</b> until the scan completes.';
+  let fails = 0, msg = '<b>Touch and hold</b> the fingerprint scanner (on a computer, click and hold the mouse) until the ring fills.';
   for (;;) {
-    const r = await step({ title: 'BioID Sign In', body: `<div class="signin center"><p>User ID <b class="mono">${esc(user.id)}</b></p>${user.bioid ? scannerHtml(msg) : '<p>Use this device\'s biometrics to sign in.</p>'}</div>`,
-      buttons: [{ label: 'Cancel', value: 'cancel' }, { label: 'Use Password', value: 'password' }, ...(user.deviceCred ? [{ label: 'Use Device Fingerprint / Face ID', value: 'device', primary: !user.bioid }] : [])] });
+    const r = await step({ title: 'BioID Sign In', body: `<div class="signin center"><p>User ID <b class="mono">${esc(user.id)}</b></p>${scannerHtml(msg)}</div>`,
+      buttons: [{ label: 'Cancel', value: 'cancel' }, { label: 'Use Password', value: 'password' }] });
     if (r.value === 'cancel' || r.value === 'password') return r.value;
     if (r.value === 'scan-ok') return 'bioid';
-    if (r.value === 'device') {
-      try { await DeviceBio.verify(user.deviceCred); return 'device'; }
-      catch { msg = '<span class="bad">Device biometrics could not verify you.</span> Try again, use the scanner, or use your password.'; continue; }
-    }
     if (r.value === 'scan-fail') {
       fails++;
       if (fails >= 3) {
@@ -722,86 +691,24 @@ async function bioLogin(user) {
   }
 }
 
-async function registerBioFlow(user) {
-  if (isOmni()) return omniEnroll(user);
-  const choose = await modal({ title: 'Register BioID', body: `<p>Choose how to enroll your fingerprint.</p>
-      <label class="radio"><input type="radio" name="how" value="sim" checked> <span><b>${D().name} BioID scanner (simulated)</b><br><span class="muted">Press and hold the on-screen scanner three times, like the real enrollment.</span></span></label>
-      <label class="radio"><input type="radio" name="how" value="device"${deviceBioOk ? '' : ' disabled'}> <span><b>This phone or laptop's fingerprint / Face ID</b><br><span class="muted">${deviceBioOk ? 'Uses your device\'s built-in biometrics. Nothing leaves your device.' : 'Not available in this browser.'}</span></span></label>`,
-    buttons: [{ label: 'Cancel', value: 'cancel' }, { label: 'Continue', value: 'ok', primary: true }] });
-  if (choose.value !== 'ok') return false;
-  if (choose.data.how === 'device') return linkDevice(user);
-  let i = 1, msg = '';
-  while (i <= 3) {
-    const r = await modal({ title: `Scanning fingerprint ${i} of 3`, body: scannerHtml(msg || 'Choose one finger (middle finger works well). Center it on the lens, press firmly and hold. Lift between scans.'), buttons: [{ label: 'Cancel', value: 'cancel' }] });
-    if (r.value === 'cancel') return false;
-    if (r.value === 'scan-fail') { msg = '<span class="bad">■ Scan not captured.</span> Redo scan: cover the entire lens and hold until it completes.'; continue; }
-    msg = ''; i++;
-  }
-  user.bioid = true; save();
-  await info('BioID Registered', '<p>Your fingerprint is registered. You can sign in with BioID at any cabinet where you have access.</p>');
-  return true;
-}
-
-async function linkDevice(user) {
-  try {
-    user.deviceCred = await DeviceBio.register(user); user.bioid = true; save();
-    await info('Device Linked', '<p>You can now sign in with this device\'s fingerprint or Face ID. This practice link stays on this device only.</p>');
-    return true;
-  } catch (e) {
-    await info('Device Biometrics Unavailable', `<p>Your browser did not complete biometric enrollment${e && e.name ? ` (${esc(e.name)})` : ''}. Use the simulated BioID scanner instead.</p>`);
-    return false;
-  }
-}
-
+// The witness walks up and signs with their fingerprint; the student does not type anyone's credentials.
 async function witnessFlow(purpose) {
-  let r;
-  for (;;) {
-    r = await modal({ title: 'Witness Required', body: `<p>${purpose}</p><p class="muted">The witness signs in with their own credentials and must watch the entire waste or return.</p>
-        <label for="wid">Witness User ID</label><input id="wid" autocapitalize="none" spellcheck="false" autocomplete="off">${cred('Witness user ID', 'kjones')}
-        <label for="wpw">Witness password</label><input id="wpw" type="password" autocomplete="off">${cred('Witness password', 'pyxis1')}`,
-      buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Witness BioID', value: 'bio' }, { label: 'Accept', value: 'ok', primary: true }],
-      validate: (v, d) => {
-        const id = (d.wid || '').toLowerCase();
-        if (!id) return 'Enter the witness User ID.';
-        if (!db.users[id]) return 'Witness User ID not found.';
-        if (id === session.user) return 'You cannot witness your own transaction. A second licensed nurse must sign.';
-        if (v === 'bio') return db.users[id].bioid ? null : 'This witness has no BioID on record. Use the password.';
-        return d.wpw === db.users[id].password ? null : 'Incorrect witness password.';
-      } });
-    if (r.value === 'cancel') return null;
-    const id = r.data.wid.toLowerCase();
-    if (r.value === 'ok') return id;
-    let fails = 0, msg = `${esc(userName(id))}: press and hold the scanner.`;
-    for (;;) {
-      const s = await modal({ title: 'Witness BioID', body: scannerHtml(msg), buttons: [{ label: 'Back', value: 'back' }] });
-      if (s.value === 'scan-ok') return id;
-      if (s.value === 'back') break;
-      if (++fails >= 3) { await info('Witness BioID Failed', '<p>The witness must sign with their password.</p>'); break; }
-      msg = `<span class="bad">Unable to verify (attempt ${fails} of 3).</span> Cover the lens and hold still.`;
-    }
-  }
+  const w = db.users.kjones, cab = isOmni() ? 'Omnicell' : 'Pyxis';
+  const r = await modal({ title: 'Witness Required', body: `<p>${purpose}</p>
+      <div class="witness-card"><span class="wc-avatar" aria-hidden="true">KJ</span><div><b>${esc(w.first)} ${esc(w.last)}, ${esc(w.title)}</b><span>comes to the ${cab} to witness for you.</span></div></div>
+      <div class="witness-sign" id="wsign"><span class="wc-dot"></span><span>Scanning ${esc(w.first)}'s fingerprint…</span></div>
+      <p class="muted small">The witness signs in with their own credentials and must watch the entire waste or return.</p>`,
+    buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Continue', value: 'ok', primary: true, disabled: true }] ,
+    after: () => setTimeout(() => {
+      const el = overlay.querySelector('#wsign'); if (!el) return;
+      el.classList.add('done'); el.lastElementChild.textContent = `Signed: ${w.first} ${w.last}, ${w.title} (fingerprint verified)`;
+      const b = overlay.querySelector('[data-resolve="ok"]'); if (b) { b.disabled = false; b.focus(); }
+      buzz([25, 40, 25]);
+    }, 1100) });
+  return r.value === 'ok' ? w.id : null;
 }
 
 /* ---------- medication selection ---------- */
-async function askCdc(medId, patientId) {
-  const m = F[medId]; if (!m.cdc) return { ok: true };
-  emit('cdc_shown', { med: medId, patient: patientId });
-  const r = await modal({ title: 'Clinical Data', body: `<p><b>${esc(medLabel(medId))}</b> requires assessment data before removal.</p>
-      ${m.cdc.fields.map(f => `<label for="cdc_${f.key}">${f.label}</label><input id="cdc_${f.key}" name="${f.key}" type="number" inputmode="numeric" min="${f.min}" max="${f.max}">`).join('')}`,
-    buttons: [{ label: 'Cancel', value: 'cancel', novalidate: true }, { label: 'Accept', value: 'ok', primary: true }],
-    validate: (v, d) => { for (const f of m.cdc.fields) { const x = parseFloat(d[f.key]); if (isNaN(x) || x < f.min || x > f.max) return `Enter a valid value for: ${f.label.split('(')[0].trim()}.`; } return null; } });
-  if (r.value !== 'ok') return { ok: false };
-  const vals = {}; m.cdc.fields.forEach(f => vals[f.key] = parseFloat(r.data[f.key]));
-  const note = m.cdc.fields.map(f => `${f.key.toUpperCase()} ${vals[f.key]}`).join(', ');
-  const hold = m.cdc.hold ? m.cdc.hold(vals) : null;
-  emit('cdc', { med: medId, patient: patientId, held: !!hold, vals });
-  if (hold) {
-    const h = await modal({ title: '<span class="alert-title">Hold Parameter</span>', cls: 'alert', body: `<p><b>${esc(hold)}</b></p><p class="muted">Document the held dose and the reason on the MAR.</p>`,
-      buttons: [{ label: 'Continue Anyway', value: 'go' }, { label: 'Hold Dose — Cancel Removal', value: 'hold', primary: true }] });
-    if (h.value === 'hold') { emit('hold_cancel', { med: medId, patient: patientId }); toast('Dose held. Notify the provider and document on the MAR.'); return { ok: false }; }
-  }
-  return { ok: true, note };
-}
 
 async function askDose(medId, { min, max, override }) {
   const m = F[medId];
@@ -847,11 +754,10 @@ async function selectOrder(oid) {
   }
   }
   if (o.nursePrep) return selectNursePrep(o);
-  const c = await askCdc(o.med, p.id); if (!c.ok) return;
   let dose = o.dose;
   if (dose == null) { dose = await askDose(o.med, { min: o.doseMin, max: o.doseMax }); if (dose == null) return; }
   else if (isOmni() && !await omniConfirmQty(o.med, dose)) return;
-  session.cart.push(cartItem(o.med, dose, { orderId: oid, override: false, note: c.note }));
+  session.cart.push(cartItem(o.med, dose, { orderId: oid, override: false, note: '' }));
   render();
 }
 
@@ -872,9 +778,8 @@ async function selectOverride(medId) {
     emit('order_exists', { med: medId, action: r.value });
     if (r.value === 'profile') { session.mode = 'remove'; session.tab = existing.prn ? 'prn' : 'all'; return render(); }
   }
-  const c = await askCdc(medId, p.id); if (!c.ok) return;
   const dose = await askDose(medId, { override: true }); if (dose == null) return;
-  session.cart.push(cartItem(medId, dose, { orderId: null, override: true, note: c.note }));
+  session.cart.push(cartItem(medId, dose, { orderId: null, override: true, note: '' }));
   render();
 }
 
@@ -1110,7 +1015,7 @@ async function resolveDiscrepancy(d) {
 const isOmni = () => D().key === 'omnicell';
 const oSide = list => list.map(([label, attrs, cls = '']) => `<button type="button" class="btn obtn ${cls}" ${attrs}>${label}</button>`).join('');
 const oDate = t => { const d = new Date(t); return `${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${String(d.getFullYear()).slice(2)} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-const oMenuItems = [['pc', 'Patient Care', 'patients'], ['rep', 'Reports', 'reports'], ['rd', 'Resolve Discrep', 'disc'], ['inv', 'Inventory Menus', null], ['um', 'User Menus', 'prefs'], ['am', 'Admin Menus', null]];
+const oMenuItems = [['pc', 'Patient Care', 'patients'], ['rep', 'Reports', 'reports'], ['rd', 'Resolve Discrep', 'disc'], ['inv', 'Inventory Menus', null], ['um', 'User Menus', null], ['am', 'Admin Menus', null]];
 function oMenu(active, loggedOn = true) {
   const disc = db.discrepancies.some(d => !d.resolved);
   return oMenuItems.map(([k, l, to]) => {
@@ -1265,15 +1170,6 @@ const OMNI = {
       left: oSide([['Main Menu', 'data-act="home"']]), footer: oSide([['Copy Report', 'data-act="copyReport"']]) };
   },
 
-  prefs() {
-    const u = db.users[session.user], viaFinger = session.loginMethod === 'bioid' || session.loginMethod === 'device';
-    return { title: 'User Menus', body: `<div class="prefs">
-      ${u.bioid ? `<div class="pref"><div><b>Re-enroll Your Fingerprint</b><span class="muted">${viaFinger ? 'Primary and alternate fingers. Clean the scanner first.' : 'Only available when you log on by scanning your enrolled fingerprint.'}</span></div><button class="btn" data-act="regBio"${viaFinger ? '' : ' disabled'}>Re-enroll Your Fingerprint</button></div>`
-        : `<div class="pref"><div><b>Enroll Fingerprint (practice registrar)</b><span class="muted">At a facility, a designated fingerprint registrar enrolls you. Here you can practice the enrollment yourself.</span></div><button class="btn" data-act="regBio">Enroll Fingerprint</button></div>`}
-      <div class="pref"><div><b>This device's fingerprint / Face ID</b><span class="muted">${u.deviceCred ? 'Linked on this device.' : deviceBioOk ? 'Available on this device.' : 'Not available in this browser. Use the simulated scanner.'}</span></div>
-        ${u.deviceCred ? '<button class="btn" data-act="unlinkDevice">Unlink</button>' : `<button class="btn" data-act="linkDevice"${deviceBioOk ? '' : ' disabled'}>Link Device</button>`}</div></div>`,
-      tabs: oMenu('um'), left: oSide([['Main Menu', 'data-act="home"']]) };
-  },
 
   editMy() { const o = SCREENS.editMy(); return { ...o, hint: 'Tap a patient on the left to add them to My Patients. Press Accept when finished.' }; },
 };
@@ -1289,7 +1185,7 @@ function oLogonBody(uid, stage, msg, err) {
 }
 async function omniSignIn() {
   let uid = '', stage = 'id', fails = 0, err = '';
-  let msg = 'Scan your fingerprint at any time. Place your finger <b>flat</b> on the sensor for at least <b>two seconds</b>.';
+  let msg = 'Type your user ID, then <b>touch and hold</b> the fingerprint sensor for about <b>two seconds</b> (on a computer, click and hold the mouse).';
   let user = null, method = null;
   for (;;) {
     const r = await step({ title: `${D().station} · MED1<span class="o-sub">4 West Medical-Surgical</span>`, body: oLogonBody(uid, stage, msg, err),
@@ -1315,7 +1211,7 @@ async function omniSignIn() {
     if (r.value === 'enter') {
       if (!typed || !db.users[typed]) { msg = typed ? `<span class="bad">User ID "${esc(typed)}" was not found.</span>` : '<span class="bad">Enter your User ID.</span>'; err = 'uid'; uid = typed; stage = 'id'; continue; }
       uid = typed;
-      if (stage === 'id') { stage = 'pw'; msg = 'Enter your password, or scan your fingerprint.'; continue; }
+      if (stage === 'id') { stage = 'pw'; msg = 'Touch and hold the fingerprint sensor, or enter your password.'; continue; }
       if (r.data.pw !== db.users[typed].password) { msg = '<span class="bad">Invalid password.</span> Passwords may be case sensitive — check Caps Lock.'; continue; }
       user = db.users[typed]; method = 'password'; break;
     }
@@ -1325,37 +1221,7 @@ async function omniSignIn() {
   if (undocFor(user.id).length) await info('Log-on Message', '<p><b>You Have Partial Dose Issues That Require Waste.</b></p><p class="muted">See the Partial Dose List tab, then select the patient and press Waste Meds.</p>');
   emit('signin', { user: user.id, method });
   toast(`Logged on: ${db.users[user.id].first} ${db.users[user.id].last}`);
-  if ((db.remote || []).some(q => q.user === user.id) && await omniRemotePrompt(user.id)) return;
   go('patients', { listTab: (db.myPatients[user.id] || []).length ? 'my' : 'local', sel: null });
-}
-
-async function omniEnroll(user) {
-  const choose = await modal({ title: 'Fingerprint Enrollment', body: `<p>Choose how to enroll.</p>
-      <label class="radio"><input type="radio" name="how" value="sim" checked> <span><b>Cabinet fingerprint sensor (simulated)</b><br><span class="muted">2 practice scans, then 4 enrollment scans of your primary finger. Hold each scan about 2 seconds.</span></span></label>
-      <label class="radio"><input type="radio" name="how" value="device"${deviceBioOk ? '' : ' disabled'}> <span><b>This phone or laptop's fingerprint / Face ID</b><br><span class="muted">${deviceBioOk ? 'Uses your device\'s built-in biometrics.' : 'Not available in this browser.'}</span></span></label>`,
-    buttons: [{ label: 'Cancel', value: 'cancel' }, { label: 'Next', value: 'ok', primary: true }] });
-  if (choose.value !== 'ok') return false;
-  if (choose.data.how === 'device') return linkDevice(user);
-  const fingers = ['Right index', 'Right middle'];
-  for (let f = 0; f < 2; f++) {
-    const plan = [['Practice scan', 2], ['Enrollment scan', 4]];
-    for (const [label, n] of plan) {
-      let i = 1, msg = '';
-      while (i <= n) {
-        const r = await modal({ title: `${f ? 'Alternate' : 'Primary'} finger: ${fingers[f]}`, body: `<p class="muted">${label} ${i} of ${n}</p>${scannerHtml(msg || 'Center the core (swirl) of your fingerprint on the sensor. Place it flat for at least two seconds, then lift. Do not roll your finger.')}`, buttons: [{ label: 'Cancel', value: 'cancel' }] });
-        if (r.value === 'cancel') return false;
-        if (r.value === 'scan-fail') { msg = '<span class="bad">Poor quality scan.</span> Fill the whole sensor and hold still for two seconds.'; continue; }
-        msg = ''; i++;
-      }
-    }
-    if (f === 0) {
-      const nx = await modal({ title: 'Primary Finger Enrolled', body: '<p>Enroll an alternate finger too? Either finger can then be used to log on.</p>', buttons: [{ label: 'Enroll Alternate', value: 'alt' }, { label: 'Finish', value: 'finish', primary: true }] });
-      if (nx.value === 'finish') break;
-    }
-  }
-  user.bioid = true; save();
-  await info('Enrollment Complete', '<p>Your fingerprint is enrolled. At the start of each shift, enter your User ID and scan to get on this cabinet\'s <b>Short List</b>; after that you can log on with a fingerprint scan only.</p>', 'Finish');
-  return true;
 }
 
 /* ---------- Omnicell remove / countback ---------- */
@@ -1392,10 +1258,9 @@ async function omniSelectStocked(medId) {
     validate: (v, d) => d.reason || (d.ovtext || '').length > 2 ? null : 'Select the reason for the override, or enter your own.' });
   if (rr.value !== 'ok') return;
   const reason = rr.data.ovtext && !rr.data.reason ? rr.data.ovtext : rr.data.reason;
-  const c = await askCdc(medId, p.id); if (!c.ok) return;
   const dose = await askDose(medId, { override: true }); if (dose == null) return;
   emit('override_reason', { reason });
-  session.cart.push(cartItem(medId, dose, { key: 'ov-' + medId, orderId: null, override: true, reason, note: [reason, c.note].filter(Boolean).join(' · ') }));
+  session.cart.push(cartItem(medId, dose, { key: 'ov-' + medId, orderId: null, override: true, reason, note: reason }));
   session.tab = 'display';
   render();
 }
@@ -1641,123 +1506,6 @@ async function selectNursePrep(o) {
   render();
 }
 
-/* ---------- Omnicell: pending Anywhere RN requests at log-on ---------- */
-function buildRemoteCart(q) {
-  const cart = [], bad = [];
-  q.items.forEach(it => {
-    const o = orderById(it.orderId);
-    if (!o || orderStatus(o).kind === 'future') { bad.push(`${medLabel(it.med)}: no active med order`); return; }
-    const parts = o.nursePrep ? o.nursePrep.items.map((c, i) => ({ med: c.med, qty: c.qty, dose: c.qty * F[c.med].strength, key: `${o.id}#${i}`, group: o.id, orderId: o.id, nursePrep: true, override: false, note: 'Anywhere RN request' }))
-      : [cartItem(o.med, it.dose, { orderId: o.id, override: false, note: 'Anywhere RN request' })];
-    const short = parts.find(c => db.physical[c.med] < c.qty);
-    if (short) bad.push(`${medLabel(short.med)}: insufficient quantity in this cabinet`); else cart.push(...parts);
-  });
-  return { cart, bad };
-}
-async function omniRemotePrompt(userId) {
-  for (;;) {
-    const mine = db.remote.filter(q => q.user === userId);
-    if (!mine.length) return false;
-    const r = await step({ title: 'Pending Remote Requests', body: `<div class="olist">${mine.map(q => { const pt = PAT(q.patient);
-        return `<div class="orow med1"><span><b>${esc(patName(pt))}</b> · Rm ${esc(pt.room)}<br>${q.kind === 'issue' ? 'Issue' : 'Return'}: ${q.items.map(i => esc(medLabel(i.med))).join(', ')}</span><span class="oright">Created ${oDate(q.t)}</span></div>`; }).join('')}</div>`,
-      hint: 'You have pending Anywhere RN requests. Press Issue or Return to complete them now, or Proceed with Login to handle them later.',
-      buttons: [...(mine.some(q => q.kind === 'issue') ? [{ label: 'Issue', value: 'issue', primary: true }] : []), ...(mine.some(q => q.kind === 'return') ? [{ label: 'Return', value: 'return' }] : []), { label: 'Proceed with Login', value: 'skip' }] });
-    if (r.value === 'skip') return false;
-    let list = mine.filter(q => q.kind === r.value), q = list[0];
-    if (new Set(list.map(x => x.patient)).size > 1) {
-      const pick = await step({ title: `Select Patient for Remote ${r.value === 'issue' ? 'Issue' : 'Return'}`, body: `<div class="olist">${list.map(x => { const pt = PAT(x.patient); return `<button type="button" class="orow med1" data-resolve="${x.id}" data-novalidate><span><b>${esc(patName(pt))}</b><br>${esc(pt.mrn)}</span><span class="oright">Rm#: ${esc(pt.room)}</span></button>`; }).join('')}</div>`,
-        hint: 'Select one of the patients to proceed.', buttons: [{ label: 'Proceed with Login', value: 'skip' }] });
-      if (pick.value === 'skip') return false;
-      q = list.find(x => x.id === pick.value);
-    }
-    session.sel = q.patient;
-    db.remote = db.remote.filter(x => x.id !== q.id); save();
-    emit('remote_started', { kind: q.kind, patient: q.patient });
-    if (q.kind === 'issue') {
-      const { cart, bad } = buildRemoteCart(q);
-      if (bad.length) await info('Notice of Incomplete Items', `<p>These requested items cannot be issued:</p><ul>${bad.map(b => `<li>${esc(b)}</li>`).join('')}</ul>`);
-      if (!cart.length) continue;
-      session.cart = cart;
-      await runRemoval();
-      return true;
-    }
-    for (const it of q.items) { const rem = db.removals.find(x => x.id === it.remId); if (rem && rem.qty - rem.returnedQty > 0) await omniReturnFlow(rem); }
-    return true;
-  }
-}
-
-/* ---------- Anywhere RN (remote workstation, outside the cabinet) ---------- */
-const arnEl = $('#arn');
-const arn = { user: null, patient: null, tab: 'issue', msg: '' };
-function arnRender() {
-  const u = arn.user && db.users[arn.user];
-  let body;
-  if (!u) {
-    body = `<p>Log on with the same User ID and password you use at the cabinet.</p>
-      <label for="arnid">User ID</label><input id="arnid" autocapitalize="none" spellcheck="false" autocomplete="off">${cred('Your user ID', 'student')}
-      <label for="arnpw">Password</label><input id="arnpw" type="password" autocomplete="off">${cred('Your password', 'nurse1')}
-      <div class="arn-btns"><button class="btn primary" data-arn="login">Log On</button></div>`;
-  } else if (!arn.patient) {
-    const mine = db.myPatients[u.id] || [], pend = (db.remote || []).filter(q => q.user === u.id);
-    body = `<p>Signed on as <b>${esc(u.first)} ${esc(u.last)}</b>. Select a patient from <b>My Patients</b>.</p>
-      ${mine.length ? `<div class="arn-list">${mine.map(id => { const p = PAT(id); return p ? `<button class="arn-row" data-arn="pt" data-id="${id}"><b>${esc(patName(p))}</b><span>Rm ${esc(p.room)}</span></button>` : ''; }).join('')}</div>` : '<p class="bad">Your My Patients list is empty. Add patients at the cabinet first (My Patients tab → Edit My Patients).</p>'}
-      <h4>Pending requests</h4>${pend.length ? `<div class="arn-list">${pend.map(q => `<div class="arn-row static"><span><b>${q.kind === 'issue' ? 'Issue' : 'Return'}</b> · ${esc(patName(PAT(q.patient)))} — ${q.items.map(i => esc(medLabel(i.med))).join(', ')}</span><button class="btn small" data-arn="cancelReq" data-id="${q.id}">Cancel Request</button></div>`).join('')}</div>` : '<p class="muted">None.</p>'}
-      <div class="arn-btns"><button class="btn" data-arn="logout">Log Off</button></div>`;
-  } else {
-    const p = PAT(arn.patient);
-    const rows = arn.tab === 'issue'
-      ? p.orders.filter(o => orderStatus(o).kind !== 'future').map(o => `<label class="arn-row"><input type="checkbox" name="ri" value="${o.id}"> <span><b>${esc(medLabel(o.med))}</b> ${esc(sig(o))}${o.dose == null ? `<br>Dose to give: <input class="arn-dose" id="d_${o.id}" type="number" step="any" inputmode="decimal" placeholder="${num(o.doseMin)}–${num(o.doseMax)}"> ${F[o.med].unit}` : ''}</span></label>`).join('')
-      : db.removals.filter(r => r.patient === p.id && r.user === arn.user && r.qty - r.returnedQty > 0 && !r.wasted).map(r => `<label class="arn-row"><input type="checkbox" name="rr" value="${r.id}"> <span><b>${esc(medLabel(r.med))}</b> ${esc(medDesc(r.med))} — issued ${oDate(r.t)}, qty ${r.qty - r.returnedQty}</span></label>`).join('');
-    body = `<p><b>${esc(patName(p))}</b> · Rm ${esc(p.room)} · Allergies: ${esc(allergyText(p))}</p>
-      <div class="seg small"><button class="${arn.tab === 'issue' ? 'on' : ''}" data-arn="tab" data-t="issue">Issue Request</button><button class="${arn.tab === 'return' ? 'on' : ''}" data-arn="tab" data-t="return">Return Request</button></div>
-      <div class="arn-list">${rows || `<p class="muted">${arn.tab === 'issue' ? 'No active med orders.' : 'No open issues of yours to return.'}</p>`}</div>
-      <div class="arn-btns"><button class="btn" data-arn="back">Back</button><button class="btn primary" data-arn="create">Create ${arn.tab === 'issue' ? 'Issue' : 'Return'} Request</button></div>`;
-  }
-  arnEl.innerHTML = `<div class="arn-win" role="dialog" aria-modal="true" aria-labelledby="arnTitle"><div class="arn-bar"><b id="arnTitle">Anywhere RN</b><span>Nurses' station workstation · 4 West</span><button class="arn-x" data-arn="close" aria-label="Close Anywhere RN">×</button></div>
-    <div class="arn-body">${arn.msg ? `<p class="arn-msg">${arn.msg}</p>` : ''}${body}</div></div>`;
-  arn.msg = '';
-  const f = arnEl.querySelector('input:not([type=checkbox])'); if (f && !u) f.focus();
-}
-function arnOpen() { arnEl.hidden = false; arnRender(); }
-arnEl.addEventListener('click', e => {
-  if (e.target === arnEl) { arnEl.hidden = true; return; }
-  const b = e.target.closest('[data-arn]'); if (!b) return;
-  const a = b.dataset.arn;
-  if (a === 'close') { arnEl.hidden = true; return; }
-  if (a === 'login') {
-    const id = (arnEl.querySelector('#arnid').value || '').trim().toLowerCase(), pw = arnEl.querySelector('#arnpw').value;
-    if (!db.users[id] || db.users[id].password !== pw) arn.msg = '<span class="bad">Invalid User ID or password.</span>';
-    else { arn.user = id; arn.patient = null; }
-  } else if (a === 'logout') { arn.user = null; arn.patient = null; }
-  else if (a === 'pt') { arn.patient = b.dataset.id; arn.tab = 'issue'; }
-  else if (a === 'back') arn.patient = null;
-  else if (a === 'tab') arn.tab = b.dataset.t;
-  else if (a === 'cancelReq') { db.remote = db.remote.filter(q => q.id !== b.dataset.id); save(); arn.msg = 'Request cancelled.'; renderCoach(); }
-  else if (a === 'create') {
-    const picked = [...arnEl.querySelectorAll('input[type=checkbox]:checked')].map(x => x.value);
-    if (!picked.length) arn.msg = '<span class="bad">Select at least one item.</span>';
-    else if (arn.tab === 'issue') {
-      const items = [];
-      for (const oid of picked) {
-        const o = orderById(oid); let dose = o.dose;
-        if (dose == null) { dose = parseFloat(arnEl.querySelector('#d_' + oid).value); if (isNaN(dose) || dose < o.doseMin || dose > o.doseMax) { arn.msg = `<span class="bad">Enter a dose for ${esc(medLabel(o.med))} between ${num(o.doseMin)} and ${num(o.doseMax)} ${F[o.med].unit}.</span>`; return arnRender(); } }
-        items.push({ orderId: oid, med: o.med, dose });
-      }
-      db.remote.push({ id: uid(), user: arn.user, patient: arn.patient, kind: 'issue', items, t: Date.now() });
-      emit('remote_created', { patient: arn.patient, kind: 'issue', meds: items.map(i => i.med) });
-      arn.msg = 'Issue request created. Log on at the cabinet to complete it.'; arn.patient = null;
-    } else {
-      const items = picked.map(id => { const r = db.removals.find(x => x.id === id); return { remId: id, med: r.med }; });
-      db.remote.push({ id: uid(), user: arn.user, patient: arn.patient, kind: 'return', items, t: Date.now() });
-      emit('remote_created', { patient: arn.patient, kind: 'return', meds: items.map(i => i.med) });
-      arn.msg = 'Return request created. Log on at the cabinet to complete it.'; arn.patient = null;
-    }
-    save(); renderCoach();
-  }
-  arnRender();
-});
-arnEl.addEventListener('keydown', e => { if (e.key === 'Escape') arnEl.hidden = true; if (e.key === 'Enter' && e.target.id === 'arnpw') arnEl.querySelector('[data-arn="login"]').click(); });
-
 /* ---------- reports / clipboard ---------- */
 function reportText() {
   const list = db.tx.filter(t => session.reportAll || t.user === session.user).sort((a, b) => a.t - b.t);
@@ -1770,7 +1518,7 @@ function copyText(txt) {
 }
 
 /* ---------- practice modes (same structure as the IV Pump Practice Lab) ----------
- * practice: endless random tasks with a score · checkoff: 5 tasks, one attempt each
+ * practice: endless random tasks with a score
  * free: explore with no checklist · scen: guided scenarios with hints and a debrief */
 let rcT = null;
 function renderCoachSoon() { clearTimeout(rcT); rcT = setTimeout(renderCoach, 0); }
@@ -1795,61 +1543,53 @@ const who = pid => { const p = PAT(pid); return `<b>${esc(p.first)} ${esc(p.last
 const TASKGEN = {
   routine: [
     () => { const oid = pickOne(['o101', 'o102', 'o103', 'o104', 'o105', 'o204', 'o205', 'o206', 'o403', 'o404', 'o405', 'o502', 'o504']), { o, p } = ordOf(oid);
-      const cdc = {}; let a = '';
-      if (o.med === 'digoxin_tab') { cdc.hr = rint(64, 90); a = ` Apical pulse <b>${cdc.hr}</b> bpm.`; }
-      if (o.med === 'metoprolol_tab') { cdc.hr = rint(66, 92); cdc.sbp = rint(112, 148); a = ` HR <b>${cdc.hr}</b>, BP <b>${cdc.sbp}/${rint(64, 86)}</b>.`; }
-      return { cat: 'routine', kind: 'remove', patient: p.id, med: o.med, orderId: oid, dose: o.dose, cdc, tab: 'due',
-        text: `It is time for ${who(p.id)}'s scheduled <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>.${a} Remove the dose.` }; },
-    () => { const c = pickOne([{ oid: 'o106', why: 'a temperature of 38.6 °C and a headache' }, { oid: 'o108', why: 'nausea and has vomited twice' }, { oid: 'o203', why: 'new nausea after lunch' }, { oid: 'o306', why: 'expiratory wheezes and SpO₂ 92%' }, { oid: 'o307', why: 'mild pain, 3/10' }]), { o, p } = ordOf(c.oid);
-      return { cat: 'routine', kind: 'remove', patient: p.id, med: o.med, orderId: c.oid, dose: o.dose, tab: 'prn', cdc: {},
-        text: `${who(p.id)} has ${c.why}. Order: <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Remove one dose.` }; },
+      return { cat: 'routine', kind: 'remove', patient: p.id, med: o.med, orderId: oid, dose: o.dose, tab: 'due',
+        text: `It is time for ${who(p.id)}'s scheduled <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Remove the dose.` }; },
+    () => { const c = pickOne([{ oid: 'o106', why: 'has a fever and a headache' }, { oid: 'o108', why: 'is nauseated and has vomited' }, { oid: 'o203', why: 'is nauseated' }, { oid: 'o306', why: 'is wheezing' }, { oid: 'o307', why: 'reports mild pain' }]), { o, p } = ordOf(c.oid);
+      return { cat: 'routine', kind: 'remove', patient: p.id, med: o.med, orderId: c.oid, dose: o.dose, tab: 'prn',
+        text: `${who(p.id)} ${c.why}. Order: <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Remove one dose.` }; },
   ],
   cs: [
-    () => { const c = pickOne([{ oid: 'o107', a: 'pain <b>8/10</b>, RR <b>18</b>', cdc: { pain: 8, rr: 18 } }, { oid: 'o305', a: 'anxious and restless, RR 18', cdc: {} }, { oid: 'o501', a: 'pain <b>7/10</b>, RR <b>16</b> (there are two Thompsons on the unit)', cdc: { pain: 7, rr: 16 } }, { oid: 'o402', a: 'pain <b>5/10</b>', cdc: { pain: 5 } }]), { o, p } = ordOf(c.oid);
-      return { cat: 'cs', kind: 'remove', patient: p.id, med: o.med, orderId: c.oid, dose: o.dose, tab: 'prn', cdc: c.cdc,
-        text: `${who(p.id)}: ${c.a}. Order: <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Stock: ${esc(medDesc(o.med))}. Remove the dose and document any waste <b>now</b> with a witness.` }; },
-    () => { const c = pickOne([{ oid: 'o201', doses: [0.2, 0.3, 0.4, 0.5, 0.6], cdc: { pain: 7, rr: 16 } }, { oid: 'o202', doses: [5, 10], cdc: { pain: 5 } }]), { o, p } = ordOf(c.oid), d = pickOne(c.doses);
-      return { cat: 'cs', kind: 'remove', patient: p.id, med: o.med, orderId: c.oid, dose: d, range: true, tab: 'prn', cdc: c.cdc,
-        text: `${who(p.id)}: pain ${c.cdc.pain}/10${c.cdc.rr ? `, RR ${c.cdc.rr}` : ''}. Range order: <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Per the titration guideline you will give <b>${num(d)} ${F[o.med].unit}</b>. Stock: ${esc(medDesc(o.med))}. Remove it and document any waste <b>now</b>.` }; },
+    () => { const c = pickOne([{ oid: 'o107', a: 'is asking for pain medicine' }, { oid: 'o305', a: 'is anxious and restless' }, { oid: 'o501', a: 'is asking for pain medicine (there are two Thompsons on the unit)' }, { oid: 'o402', a: 'is asking for pain medicine' }]), { o, p } = ordOf(c.oid);
+      return { cat: 'cs', kind: 'remove', patient: p.id, med: o.med, orderId: c.oid, dose: o.dose, tab: 'prn',
+        text: `${who(p.id)} ${c.a}. Order: <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Stock: ${esc(medDesc(o.med))}. Remove the dose and waste any unused portion <b>now</b> with a witness.` }; },
+    () => { const c = pickOne([{ oid: 'o201', doses: [0.2, 0.3, 0.4, 0.5, 0.6] }, { oid: 'o202', doses: [5, 10] }]), { o, p } = ordOf(c.oid), d = pickOne(c.doses);
+      return { cat: 'cs', kind: 'remove', patient: p.id, med: o.med, orderId: c.oid, dose: d, range: true, tab: 'prn',
+        text: `${who(p.id)} is asking for pain medicine. Range order: <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Per the titration guideline you will give <b>${num(d)} ${F[o.med].unit}</b>. Stock: ${esc(medDesc(o.med))}. Remove it and waste any unused portion <b>now</b>.` }; },
   ],
   override: [
     () => { const c = pickOne([
-        { pid: 'P4', med: 'naloxone_inj', dose: 0.4, why: 'RR <b>7</b>, SpO₂ 86% and pinpoint pupils after an opioid', how: 'IV now' },
-        { pid: 'P3', med: 'dextrose50_inj', dose: 25, why: 'blood glucose <b>42 mg/dL</b>, diaphoretic and unable to swallow', how: 'IV push now' },
-        { pid: 'P1', med: 'nitroglycerin_sl', dose: 0.4, why: 'new chest pain 6/10, BP 138/84', how: 'SL now' },
-        { pid: 'P3', med: 'epinephrine_inj', dose: 0.3, why: 'hives, wheezing and BP 84/50 minutes after an IV antibiotic', how: 'IM now' },
-        { pid: 'P2', med: 'diphenhydramine_inj', dose: 25, why: 'new itchy hives on both arms', how: 'IV now' }]);
-      return { cat: 'override', kind: 'remove', override: true, patient: c.pid, med: c.med, dose: c.dose, cdc: {},
-        text: `Rapid response for ${who(c.pid)}: ${c.why}. The provider gives a verbal order that pharmacy has not verified: <b>${esc(medLabel(c.med))} ${num(c.dose)} ${F[c.med].unit} ${F[c.med].route} ${c.how}</b>. Remove it on override.` }; },
+        { pid: 'P4', med: 'naloxone_inj', dose: 0.4, why: 'is very hard to arouse after an opioid', how: 'IV now' },
+        { pid: 'P3', med: 'dextrose50_inj', dose: 25, why: 'has a critically low blood sugar and cannot swallow', how: 'IV push now' },
+        { pid: 'P1', med: 'nitroglycerin_sl', dose: 0.4, why: 'has new chest pain', how: 'SL now' },
+        { pid: 'P3', med: 'epinephrine_inj', dose: 0.3, why: 'has hives and wheezing minutes after an IV antibiotic (anaphylaxis)', how: 'IM now' },
+        { pid: 'P2', med: 'diphenhydramine_inj', dose: 25, why: 'has new itchy hives on both arms', how: 'IV now' }]);
+      return { cat: 'override', kind: 'remove', override: true, patient: c.pid, med: c.med, dose: c.dose,
+        text: `Rapid response: ${who(c.pid)} ${c.why}. The provider gives a verbal order that pharmacy has not verified: <b>${esc(medLabel(c.med))} ${num(c.dose)} ${F[c.med].unit} ${F[c.med].route} ${c.how}</b>. Remove it on override.` }; },
   ],
   ret: [
-    () => { const c = pickOne([{ oid: 'o202', dose: 5, why: 'says the pain has eased and declines it' }, { oid: 'o108', dose: 4, why: 'says the nausea has passed' }, { oid: 'o402', dose: 5, why: 'has fallen asleep comfortably' }, { oid: 'o307', dose: 650, why: 'declines it — no pain now' }]), { o, p } = ordOf(c.oid);
+    () => { const c = pickOne([{ oid: 'o202', dose: 5, why: 'says the pain has eased and declines it' }, { oid: 'o108', dose: 4, why: 'says the nausea has passed' }, { oid: 'o402', dose: 5, why: 'has fallen asleep comfortably' }, { oid: 'o307', dose: 650, why: 'declines it' }]), { o, p } = ordOf(c.oid);
       const q = cartItem(o.med, c.dose, {}).qty;
-      return { cat: 'ret', kind: 'return', patient: p.id, med: o.med, orderId: c.oid, dose: c.dose, qty: q, seed: () => seedRemoval({ patient: p.id, med: o.med, orderId: c.oid, dose: c.dose, minsAgo: 3, refused: true }),
-        text: `A few minutes ago you removed <b>${q} ${unitWord(o.med, q)} of ${esc(medLabel(o.med))}</b> for ${who(p.id)}. At the bedside the patient ${c.why}. The package is sealed. Return it.` }; },
+      return { cat: 'ret', kind: 'return', patient: p.id, med: o.med, orderId: c.oid, dose: c.dose, qty: q, seed: () => seedRemoval({ patient: p.id, med: o.med, orderId: c.oid, dose: c.dose, minsAgo: 0, refused: true }),
+        text: `You just removed <b>${q} ${unitWord(o.med, q)} of ${esc(medLabel(o.med))}</b> for ${who(p.id)}. At the bedside the patient ${c.why}. The package is sealed. Return it.` }; },
   ],
   safety: [
-    () => { const hr = rint(46, 56); return { cat: 'safety', kind: 'hold', patient: 'P1', med: 'digoxin_tab', orderId: 'o101', dose: 0.125, cdc: { hr }, tab: 'due',
-        text: `It is time for ${who('P1')}'s <b>digoxin 0.125 mg PO daily</b>. Apical pulse <b>${hr}</b> bpm (counted for a full minute).`, holdWhy: `Apical pulse ${hr} is below 60: hold digoxin and notify the provider.` }; },
-    () => { const hr = rint(50, 58), sbp = rint(88, 98); return { cat: 'safety', kind: 'hold', patient: 'P1', med: 'metoprolol_tab', orderId: 'o102', dose: 25, cdc: { hr, sbp }, tab: 'due',
-        text: `It is time for ${who('P1')}'s <b>metoprolol tartrate 25 mg PO BID</b>. HR <b>${hr}</b>, BP <b>${sbp}/58</b>.`, holdWhy: `HR ${hr} and SBP ${sbp} meet the hold parameters (HR < 60 or SBP < 100): hold and notify the provider.` }; },
-    () => { const rr = rint(8, 10); return { cat: 'safety', kind: 'hold', patient: 'P1', med: 'morphine_inj', orderId: 'o107', dose: 2, cdc: { pain: 7, rr }, tab: 'prn',
-        text: `${who('P1')} rates his pain 7/10 but is drowsy; RR <b>${rr}</b>. Order: <b>morphine 2 mg IV q4h PRN severe pain</b>.`, holdWhy: `RR ${rr} is below 12: hold the opioid, assess sedation and notify the provider.` }; },
-    () => ({ cat: 'safety', kind: 'hold', patient: 'P4', med: 'morphine_inj', dose: 2, override: true, cdc: { pain: 8, rr: 16 },
-        text: `A covering provider in the hallway asks you to "grab morphine 2 mg IV" for ${who('P4')}, pain 8/10. There is no written order yet.`, holdWhy: 'Robert Thompson is allergic to morphine (hives): do not give it; clarify the order with the prescriber.' }),
-    () => { const mins = rint(60, 150); return { cat: 'safety', kind: 'hold', patient: 'P1', med: 'morphine_inj', orderId: 'o107', dose: 2, cdc: { pain: 6, rr: 16 }, tab: 'prn',
+    () => ({ cat: 'safety', kind: 'hold', patient: 'P4', med: 'morphine_inj', dose: 2, override: true,
+        text: `A covering provider in the hallway asks you to "grab morphine 2 mg IV" for ${who('P4')}, who is in pain. There is no written order yet.`, holdWhy: 'Robert Thompson is allergic to morphine (hives): do not give it; clarify the order with the prescriber.' }),
+    () => { const mins = rint(60, 150); return { cat: 'safety', kind: 'hold', patient: 'P1', med: 'morphine_inj', orderId: 'o107', dose: 2, tab: 'prn',
         seed: () => seedRemoval({ patient: 'P1', med: 'morphine_inj', orderId: 'o107', dose: 2, minsAgo: mins }),
-        text: `${who('P1')} asks for more pain medicine; pain 6/10, RR 16. Order: <b>morphine 2 mg IV q4h PRN severe pain</b>.`, holdWhy: `The last dose was removed ${mins} minutes ago. The order is every 4 hours, so the next dose is not due yet.` }; },
+        text: `${who('P1')} asks for more pain medicine. Order: <b>morphine 2 mg IV q4h PRN severe pain</b>.`, holdWhy: `The last dose was removed ${mins} minutes ago. The order is every 4 hours, so the next dose is not due yet.` }; },
+    () => { const c = pickOne(['o405', 'o502', 'o105', 'o205']), { o, p } = ordOf(c), mins = rint(20, 50);
+      return { cat: 'safety', kind: 'hold', patient: p.id, med: o.med, orderId: c, dose: o.dose, tab: 'all',
+        seed: () => seedRemoval({ patient: p.id, med: o.med, orderId: c, dose: o.dose, minsAgo: mins }),
+        text: `A classmate asks you to get ${who(p.id)}'s 0900 <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b> "because nobody has given it yet."`, holdWhy: `This dose was already removed ${mins} minutes ago. Removing it again could cause a double dose — check the eMAR and ask who removed it.` }; },
   ],
 };
 function genTask(cat) { const pool = cat && cat !== 'all' ? TASKGEN[cat] : Object.values(TASKGEN).flat(); return pickOne(pool)(); }
 
 let PX = { task: null, events: [], result: null, held: false, showAnswer: false };
-let QZ = null;
-const newQuiz = () => ({ count: 5, cats: shuffle(['routine', 'cs', 'override', 'ret', 'safety']), results: [], done: false });
 function newTask(same = false, quiet = false) {
-  if (db.mode === 'checkoff' && QZ && QZ.results.length >= QZ.count) { QZ.done = true; PX = { task: null, events: [], result: null }; if (!quiet) renderCoach(); return; }
-  const t = same && PX.task ? PX.task : db.mode === 'checkoff' ? genTask(QZ.cats[QZ.results.length]) : genTask(db.pfilter || 'all');
+  const t = same && PX.task ? PX.task : genTask(db.pfilter || 'all');
   cancelFlows(); session.cart = [];
   if (t.orderId) delete db.orders[t.orderId];
   if (db.physical[t.med] < 6) db.physical[t.med] = F[t.med].count;
@@ -1863,7 +1603,7 @@ function newTask(same = false, quiet = false) {
   if (session.user) go(isOmni() ? 'patients' : 'home'); else go('standby');
 }
 function practiceEvent(e) {
-  if (!['practice', 'checkoff'].includes(db.mode) || !PX.task || PX.result) return;
+  if (db.mode !== 'practice' || !PX.task || PX.result) return;
   PX.events.push(e);
   const t = PX.task;
   if (t.kind === 'return' ? e.type === 'returned' : e.type === 'txn_done') finishTask(false);
@@ -1872,11 +1612,8 @@ function practiceEvent(e) {
 function finishTask(held) {
   PX.held = PX.held || held;
   PX.result = evalTask(PX.task, PX.events, PX.held);
-  if (db.mode === 'checkoff') QZ.results.push({ task: PX.task, result: PX.result });
-  else {
-    const sc = db.pscore = db.pscore || { correct: 0, total: 0, streak: 0, best: 0 };
-    sc.total++; if (PX.result.ok) { sc.correct++; sc.streak++; sc.best = Math.max(sc.best, sc.streak); } else sc.streak = 0;
-  }
+  const sc = db.pscore = db.pscore || { correct: 0, total: 0, streak: 0, best: 0 };
+  sc.total++; if (PX.result.ok) { sc.correct++; sc.streak++; sc.best = Math.max(sc.best, sc.streak); } else sc.streak = 0;
   save(); renderCoachSoon();
   toast(PX.result.ok ? 'Correct — see the Practice Coach.' : 'Not quite — see the Practice Coach.', PX.result.ok ? 'good' : '', () => $('#coach').scrollIntoView({ behavior: 'smooth' }));
 }
@@ -1923,10 +1660,9 @@ function taskMath(t) {
 }
 function answerSteps(t) {
   const o = isOmni(), nm = `<b>${esc(pn(t.patient))}</b>`, med = `<b>${esc(medLabel(t.med))}</b>`, w = taskWaste(t), u = F[t.med].unit;
-  const cdcTxt = Object.entries(t.cdc || {}).map(([k, v]) => `${({ hr: 'HR', sbp: 'SBP', pain: 'pain', rr: 'RR' })[k]} ${v}`).join(', ');
-  const s = [o ? 'Log on: user ID <b>student</b>, Enter, password <b>nurse1</b>, Enter.' : 'Tap the screen and sign in: user ID <b>student</b>, password <b>nurse1</b>.'];
+  const s = [o ? 'Log on: type <b>student</b>, then touch and hold the fingerprint sensor.' : 'Tap the screen, type <b>student</b>, Next, then touch and hold the fingerprint scanner.'];
   if (t.kind === 'hold') {
-    return [`Read the task: ${esc(t.holdWhy)}`, 'Do not remove the medication. If you already started, cancel when the cabinet warns you (hold parameter, allergy or last-dose alert).', 'Press <b>Can\'t give: hold and clarify</b>, notify the provider and document the held dose.'];
+    return [`Read the task: ${esc(t.holdWhy)}`, 'Do not remove the medication. If you already started, cancel when the cabinet warns you (allergy, last-dose or already-removed alert).', 'Press <b>Can\'t give: hold and clarify</b>, notify the provider and document the held dose.'];
   }
   if (t.kind === 'return') return s.concat(o
     ? [`Select ${nm} → <b>Return Meds</b>.`, `Select ${med} on Meds Eligible to Return.`, `Administration Amount <b>0</b>, Quantity to Return <b>${t.qty}</b>, pick a reason, check "sealed", <b>Return Now</b>.`, ...(F[t.med].controlled ? ['Witness: <b>kjones</b> / <b>pyxis1</b>.'] : []), 'Place it in the return bin → <b>OK</b>.']
@@ -1934,9 +1670,8 @@ function answerSteps(t) {
   if (t.override) return s.concat(o
     ? [`Select ${nm} → <b>Remove Meds</b> → <b>Stocked Meds</b> tab.`, `Select ${med} → <b>Yes</b> → reason <b>Emergency Situation</b> → OK.`, `Amount to administer <b>${num(t.dose)} ${u}</b> → OK.`, '<b>Remove Now</b> → follow the guiding lights → <b>OK</b>.']
     : [`Select ${nm} → <b>Override</b>.`, `Select ${med}; amount to administer <b>${num(t.dose)} ${u}</b> → OK.`, '<b>Remove Med</b> → reason <b>Emergency / rapid response</b> → Remove Meds.', 'Take it from the lit pocket → <b>Remove &amp; Close Drawer</b>.']);
-  const tab = t.tab === 'due' ? (o ? 'Scheduled Meds' : 'Due Now') : (o ? 'PRN Only' : 'PRN');
+  const tab = t.tab === 'due' ? (o ? 'Scheduled Meds' : 'Due Now') : t.tab === 'all' ? (o ? 'Active Med Orders' : 'All Orders') : (o ? 'PRN Only' : 'PRN');
   const out = s.concat(o ? [`Select ${nm} → <b>Remove Meds</b>.`, `<b>${tab}</b> tab → select ${med}.`] : [`My Patients → select ${nm} → <b>Remove</b>.`, `<b>${tab}</b> tab → select ${med}.`]);
-  if (cdcTxt) out.push(`Enter the assessment: ${cdcTxt}.`);
   out.push(t.range ? `Amount to administer: <b>${num(t.dose)} ${u}</b>.` : o ? 'Confirm the intended dose → <b>OK</b>.' : `It moves to Selected Meds.`);
   if (o) { out.push('<b>Remove Now</b> → open the lit bin, take the item → <b>OK</b>.'); if (F[t.med].controlled) out.push('Countback: enter the quantity <b>remaining</b> in the bin.'); }
   else { out.push('<b>Remove Med</b>.'); if (F[t.med].controlled) out.push('Blind count: count what is in the pocket <b>before</b> removing.'); out.push('<b>Remove &amp; Close Drawer</b>.'); }
@@ -1950,8 +1685,6 @@ function describe(e) {
     case 'signin': return `Signed in with ${e.method === 'password' ? 'password' : 'fingerprint'}`;
     case 'signout': return 'Signed out';
     case 'patient_action': return `${p(e.patient)} → ${esc(({ remove: T('remove'), override: 'Override', return: 'Return', waste: 'Waste', past: T('past'), kits: 'Kits' })[e.action] || e.action)}`;
-    case 'cdc': return `Assessment entered for ${ml(e.med)}${e.held ? ' — hold parameter met' : ''}`;
-    case 'hold_cancel': return `Held ${ml(e.med)} (hold parameter)`;
     case 'dose_entered': return `Amount to administer: ${num(e.dose)} ${F[e.med].unit} ${ml(e.med)}`;
     case 'count': return `${isOmni() ? 'Countback' : 'Blind count'} ${ml(e.med)}: ${e.correct ? 'accurate' : 'did not match the drawer'}`;
     case 'removed': return `Removed ${e.qty} ${unitWord(e.med, e.qty)} ${ml(e.med)} for ${p(e.patient)}${e.override ? ' (override)' : ''}`;
@@ -1977,21 +1710,13 @@ function describe(e) {
 const coach = $('#coach');
 function modeSummary(m) {
   if (m === 'practice') return 'A new task every round: scheduled and PRN meds, controlled substances with waste, overrides, returns, and safety checks you should refuse. Your score and streak are kept.';
-  if (m === 'checkoff') return 'Five random tasks, one from each type, one attempt each, then a score you can copy for your instructor.';
   if (m === 'free') return 'No checklist. Explore every screen: sign in, look up patients, remove, override, waste, return, kits, temporary patients and discrepancies. The event history shows what the cabinet recorded.';
   const S = scenById(m); return S ? devText(S.brief).replace(/<[^>]+>/g, '') : '';
 }
 function practiceHtml() {
-  if (db.mode === 'checkoff' && QZ && QZ.done) {
-    const ok = QZ.results.filter(q => q.result.ok).length, pct = Math.round(ok / QZ.count * 100);
-    return `<div class="pr-result ${pct >= 80 ? 'good' : 'bad'}"><strong>Check-off score: ${pct}% (${ok} of ${QZ.count})</strong>
-      <table class="pr-table"><thead><tr><th>Task</th><th>Result</th></tr></thead><tbody>${QZ.results.map((q, i) => `<tr class="${q.result.ok ? 'ok' : 'no'}"><td>${i + 1}. ${esc(PCATS[q.task.cat])}: ${esc(pn(q.task.patient))} — ${esc(medLabel(q.task.med))}</td><td>${q.result.ok ? '✓ Correct' : '✕ ' + esc(q.result.items.filter(x => !x.ok).map(x => x.label).join(', '))}</td></tr>`).join('')}</tbody></table></div>
-      <div class="coach-btns"><button class="btn small" data-cact="copyquiz">Copy results for instructor</button><button class="btn small" data-cact="newquiz">Start a new check-off</button></div>`;
-  }
   const t = PX.task; if (!t) return '';
-  const p = PAT(t.patient), sc = db.pscore || { correct: 0, total: 0, streak: 0, best: 0 }, quiz = db.mode === 'checkoff';
-  const head = quiz ? `<div class="pr-head"><h3>Check-off · task ${QZ.results.length + (PX.result ? 0 : 1)} of ${QZ.count}</h3></div><p class="small muted">One attempt per task. No answers or skips.</p>`
-    : `<div class="pr-head"><h3>Practice mode</h3><label class="pr-spec" for="pcat">Task type <select id="pcat">${Object.entries(PCATS).map(([k, v]) => `<option value="${k}"${(db.pfilter || 'all') === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label></div>
+  const p = PAT(t.patient), sc = db.pscore || { correct: 0, total: 0, streak: 0, best: 0 };
+  const head = `<div class="pr-head"><h3>Practice mode</h3><label class="pr-spec" for="pcat">Task type <select id="pcat">${Object.entries(PCATS).map(([k, v]) => `<option value="${k}"${(db.pfilter || 'all') === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label></div>
       <div class="pr-score"><span><b>${sc.correct}</b>/${sc.total} correct</span><span>Streak <b>${sc.streak}</b></span><span>Best <b>${sc.best}</b></span></div>`;
   const band = `<dl class="band"><div class="bname">${esc(pn(t.patient))}</div><dt>Room</dt><dd class="mono">${esc(p.room)}</dd><dt>MRN</dt><dd class="mono">${esc(p.mrn)}</dd><dt>DOB</dt><dd class="mono">${fmtDob(p.dob)}</dd><dt>Allergies</dt><dd>${esc(allergyText(p))}</dd></dl>`;
   const order = `<div class="orders"><h4>Task</h4><p>${t.text}</p></div>`;
@@ -2001,11 +1726,10 @@ function practiceHtml() {
     body = `<div class="pr-result ${r.ok ? 'good' : 'bad'}"><strong>${r.ok ? 'Correct' : 'Not quite'}</strong>
       <table class="pr-table"><thead><tr><th></th><th>Task needs</th><th>You did</th></tr></thead><tbody>${r.items.map(i => `<tr class="${i.ok ? 'ok' : 'no'}"><td>${i.ok ? '✓' : '✕'} ${esc(i.label)}</td><td>${esc(i.want)}</td><td>${esc(i.got)}</td></tr>`).join('')}</tbody></table>
       <p class="pr-math">${taskMath(t)}</p></div>
-      <div class="coach-btns">${quiz ? `<button class="btn small primary-c" data-cact="pnext">${QZ.results.length < QZ.count ? `Next task (${QZ.results.length + 1} of ${QZ.count})` : 'See my results'}</button>`
-        : `<button class="btn small primary-c" data-cact="pnext">Next task</button>${r.ok ? '' : '<button class="btn small" data-cact="pretry">Try this task again</button>'}`}</div>`;
+      <div class="coach-btns">${`<button class="btn small primary-c" data-cact="pnext">Next task</button>${r.ok ? '' : '<button class="btn small" data-cact="pretry">Try this task again</button>'}`}</div>`;
   } else {
     body = `<p class="pr-help">Use the cabinet to do the task. Your work is checked when the ${t.kind === 'return' ? 'return' : 'removal'} is finished. If the order should <b>not</b> be given, don't remove it.</p>
-      <div class="coach-btns"><button class="btn small" data-cact="phold">Can't give: hold and clarify</button>${quiz ? '' : `<button class="btn small" data-cact="panswer">${PX.showAnswer ? 'Hide' : 'Show'} the answer</button><button class="btn small ghost" data-cact="pskip">Skip</button>`}</div>
+      <div class="coach-btns"><button class="btn small" data-cact="phold">Can't give: hold and clarify</button><button class="btn small" data-cact="panswer">${PX.showAnswer ? 'Hide' : 'Show'} the answer</button><button class="btn small ghost" data-cact="pskip">Skip</button></div>
       ${PX.showAnswer ? `<div class="pr-answer"><ol>${answerSteps(t).map(x => `<li>${x}</li>`).join('')}</ol><p class="pr-math">${taskMath(t)}</p></div>` : ''}`;
   }
   return head + band + order + body;
@@ -2031,28 +1755,26 @@ function renderCoach() {
   const sel = mode === 'scen' && db.scen ? db.scen.id : mode;
   let html = `<div class="coach-head"><h2>Practice Coach</h2><button class="btn small ghost only-narrow" data-cact="toDevice">Back to cabinet ↑</button></div>
     <div class="dev-switch" role="radiogroup" aria-label="Cabinet type">${Object.values(DEVICES).map(d => `<button role="radio" aria-checked="${D().key === d.key}" class="${D().key === d.key ? 'on' : ''}" data-cact="device" data-dev="${d.key}"><b>${d.key === 'pyxis' ? 'Pyxis' : 'Omnicell'}</b><span>${d.key === 'omnicell' ? 'Omnicell XT · Color Touch' : 'Pyxis MedStation ES'}</span></button>`).join('')}</div>
-    ${isOmni() ? `<button class="btn small arn-open" data-cact="arn">Open Anywhere RN (nurses' station)${(db.remote || []).length ? ` · ${db.remote.length} pending` : ''}</button>` : ''}
     <div class="picker"><label for="modeSel">Mode</label><select id="modeSel">
       <option value="practice"${sel === 'practice' ? ' selected' : ''}>Practice mode: random tasks</option>
-      <option value="checkoff"${sel === 'checkoff' ? ' selected' : ''}>Check-off: 5 random tasks</option>
       <option value="free"${sel === 'free' ? ' selected' : ''}>Free practice: explore the cabinet</option>
       <optgroup label="Guided scenarios">${SCENARIOS.map(s => `<option value="${s.id}"${sel === s.id ? ' selected' : ''}>${esc(s.level)}: ${esc(devText(s.title).replace(/<[^>]+>/g, ''))}${s.device ? ' (Omnicell only)' : ''}</option>`).join('')}</optgroup></select>
       <p class="summary">${esc(modeSummary(sel))}</p>
-      <div class="coach-btns"><button class="btn small" data-cact="restartMode">${mode === 'scen' ? 'Restart scenario' : mode === 'free' ? 'Reset practice data' : mode === 'checkoff' ? 'Restart check-off' : 'New task'}</button></div></div>`;
-  if (mode === 'practice' || mode === 'checkoff') html += `<div class="pr">${practiceHtml()}</div>`;
+      <div class="coach-btns"><button class="btn small" data-cact="restartMode">${mode === 'scen' ? 'Restart scenario' : mode === 'free' ? 'Reset practice data' : 'New task'}</button></div></div>`;
+  if (mode === 'practice') html += `<div class="pr">${practiceHtml()}</div>`;
   else if (mode === 'scen') html += scenarioHtml();
   else html += `<div class="scen"><h3>Free practice</h3><p class="small">No checklist. Some things to try:</p><ul class="small ideas">
-      <li>Sign in with a password, then register and use BioID (User ${isOmni() ? 'Menus' : 'Preferences'}).</li><li>Build My Patients, then remove a scheduled med and a PRN.</li>
+      <li>Sign in with your fingerprint, and once with the password.</li><li>Build My Patients, then remove a scheduled med and a PRN.</li>
       <li>Remove a controlled substance: ${isOmni() ? 'countback' : 'blind count'}, then waste now or later.</li><li>Override an emergency med; try morphine for Robert Thompson and read the allergy alert.</li>
       <li>Return an unopened item; remove a kit; add a temporary patient.</li><li>Remove fentaNYL and count carefully — the pocket is one short. Then resolve the discrepancy.</li></ul></div>`;
   html += `<details class="coach-sec" id="histDet"${mode === 'free' || session.histOpen ? ' open' : ''}><summary>Event history</summary>${hist.length ? `<ol class="history">${hist.slice(0, 25).map(h => `<li><span class="mono">${hhmm(h.t)}</span> ${describe(h.e)}</li>`).join('')}</ol>` : '<p class="small muted">Nothing recorded yet.</p>'}</details>
-    <details class="coach-sec"><summary>Practice accounts</summary><ul class="small">
-      <li><b>You:</b> user ID <code>student</code>, password <code>nurse1</code></li>
-      <li><b>Witness RNs:</b> <code>kjones</code> / <code>pyxis1</code> · <code>mlee</code> / <code>pyxis2</code></li>
-      <li>The user ID and password are also shown under each box on the sign-in screens.</li>
-      <li><b>BioID:</b> press and hold the on-screen scanner about ${isOmni() ? '2' : '1.5'} seconds. Lift early to practice a failed scan.</li></ul></details>
+    <details class="coach-sec"><summary>Signing in</summary><ul class="small">
+      <li>User ID <code>student</code>, then your fingerprint: <b>touch and hold</b> the scanner (phone or tablet) or <b>click and hold</b> the mouse (computer) for about ${isOmni() ? '2' : '1.5'} seconds. Lift early to practice a failed scan.</li>
+      <li>Password (if you choose it instead): <code>nurse1</code>. The user ID and password are shown under each box.</li>
+      <li>When a witness is needed, Kelly Jones, RN comes to the cabinet and signs with a fingerprint for you.</li></ul></details>
     <details class="coach-sec"><summary>Settings</summary>
       <label class="check"><input type="checkbox" data-cact="challenge" ${db.settings.challenge ? 'checked' : ''}> <span><b>Dosage-calculation challenge</b><br><span class="muted small">Hide the calculated waste. Students calculate the waste amount and volume themselves.</span></span></label>
+      <label class="check"><input type="checkbox" data-cact="haptics" ${db.settings.haptics === false ? '' : 'checked'}> <span><b>Vibration (haptics)</b><br><span class="muted small">Short vibrations on taps, fingerprint scans, drawers and alerts. Works on most Android phones and tablets; iPhone and iPad browsers do not allow it.</span></span></label>
       <div class="coach-btns"><button class="btn small" data-cact="resetScore">Reset my score</button><button class="btn small danger" data-cact="resetAll">Reset everything</button></div></details>
     <details class="coach-sec"><summary>Key symbols</summary><ul class="small keys">
       <li><span class="dot mini"></span> Blue dot — medication due now</li><li><span class="dot mini past"></span> Orange — past due</li>
@@ -2069,9 +1791,8 @@ function resultHtml(sc, S) {
 function setMode(m) {
   if (m.startsWith('s') && scenById(m)) return startScenario(m);
   db.mode = m; db.scen = null;
-  if (m === 'checkoff') QZ = newQuiz();
   save();
-  if (m === 'practice' || m === 'checkoff') newTask();
+  if (m === 'practice') newTask();
   else { PX = { task: null, events: [], result: null }; render(); }
 }
 coach.addEventListener('click', e => {
@@ -2083,12 +1804,8 @@ coach.addEventListener('click', e => {
   else if (a === 'pretry') newTask(true);
   else if (a === 'panswer') { PX.showAnswer = !PX.showAnswer; renderCoach(); }
   else if (a === 'phold') { if (PX.task && !PX.result) finishTask(true); }
-  else if (a === 'newquiz') setMode('checkoff');
-  else if (a === 'copyquiz') { const ok = QZ.results.filter(q => q.result.ok).length;
-    copyText(`MedStation Practice Simulator — check-off\nCabinet: ${D().model}\nDate: ${new Date().toLocaleString()}\nScore: ${Math.round(ok / QZ.count * 100)}% (${ok} of ${QZ.count})\n` + QZ.results.map((q, i) => `${i + 1}. ${PCATS[q.task.cat]}: ${pn(q.task.patient)} — ${medLabel(q.task.med)}: ${q.result.ok ? 'Correct' : 'Missed: ' + q.result.items.filter(x => !x.ok).map(x => x.label).join(', ')}`).join('\n')); }
   else if (a === 'hint') { session.hintsShown = (session.hintsShown || 0) + 1; renderCoach(); }
   else if (a === 'debrief') { session.showDebrief = true; renderCoach(); }
-  else if (a === 'arn') arnOpen();
   else if (a === 'device') { if (db.settings.device !== b.dataset.dev) { db.settings.device = b.dataset.dev; save(); signOutQuiet(); toast(`Switched to ${D().model}.`); } }
   else if (a === 'toDevice') $('#device').scrollIntoView({ behavior: 'smooth' });
   else if (a === 'resetScore') { db.pscore = { correct: 0, total: 0, streak: 0, best: 0 }; save(); renderCoach(); toast('Score reset.'); }
@@ -2102,6 +1819,7 @@ coach.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'modeSel') setMode(t.value);
   else if (t.id === 'pcat') { db.pfilter = t.value; save(); newTask(); }
+  else if (t.dataset.cact === 'haptics') { db.settings.haptics = t.checked; save(); if (t.checked) buzz([20, 40, 20]); }
   else if (t.dataset.cact === 'challenge') { db.settings.challenge = t.checked; save(); toast(t.checked ? 'Challenge mode on: calculate waste yourself.' : 'Challenge mode off.'); }
 });
 coach.addEventListener('toggle', e => { if (e.target.id === 'histDet') session.histOpen = e.target.open; }, true);
@@ -2111,8 +1829,8 @@ $('#coachJump').addEventListener('click', () => $('#coach').scrollIntoView({ beh
 
 if (/[?&]e2e\b/.test(location.search)) window.__medsim = { task: () => PX.task, result: () => PX.result };
 if (!db.mode) db.mode = 'practice';
-if (db.mode === 'scen' && !db.scen) db.mode = 'free';
-if (db.mode === 'checkoff') QZ = newQuiz();
-if (db.mode === 'practice' || db.mode === 'checkoff') newTask(false, true);
+if (db.mode === 'scen' && (!db.scen || !scenById(db.scen.id))) db.mode = 'free';
+if (db.mode === 'checkoff') db.mode = 'practice';
+if (db.mode === 'practice') newTask(false, true);
 render();
 })();

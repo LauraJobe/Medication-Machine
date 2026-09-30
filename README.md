@@ -1,110 +1,61 @@
 # MedStation Practice Simulator
 
-A browser-based practice version of an automated medication dispensing cabinet, built so nursing students can rehearse **Pyxis-style** and **Omnicell-style** workflows before clinical. It runs on laptops, tablets and phones and needs no install, accounts or server.
+A browser-based practice version of an automated medication dispensing cabinet, built so nursing students can rehearse **Pyxis-style** and **Omnicell-style** workflows before clinical. It runs on computers, tablets and phones, with no install and no accounts.
 
-> Educational simulator. Workflows are modeled on published BD Pyxis™ MedStation™ ES job aids, a Pyxis MedStation 3000 training manual, and the Omnicell Color Touch 22.5 user guide. This project is not affiliated with or endorsed by BD or Omnicell. All patients, orders and users are fictional. Do not enter real patient information.
+> Educational simulator. Workflows are modeled on published BD Pyxis™ MedStation™ ES job aids, a Pyxis MedStation 3000 training manual, and the Omnicell® Color Touch 22.5 user guide. This project is not affiliated with or endorsed by BD or Omnicell. All patients, orders and users are fictional. Do not enter real patient information.
+
+## Signing in
+
+- Type the user ID **student**, then sign in with a fingerprint: **touch and hold** the on-screen scanner (phones and tablets) or **click and hold** the mouse (computers) until the ring fills. Lifting early practices a failed scan. Nothing has to be registered.
+- The password **nurse1** also works; the user ID and password are printed under each box.
+- When a witness is needed (waste, controlled returns, discrepancies), **Kelly Jones, RN** walks up and signs with a fingerprint automatically — students never type anyone else's credentials.
+
+Vital signs (pain, RR, HR, BP) are not entered at the cabinet; they are documented in the EMR, so the simulator never asks for them.
 
 ## Two cabinet types
 
-Switch at the top of the **Practice Coach**. Patients, medications and the scenarios are shared, so students can practice the same task on both cabinets.
+Switch at the top of the **Practice Coach**. Patients, medications and scenarios are shared.
 
 | | Pyxis mode | Omnicell mode (Color Touch 22.5 user guide) |
 | --- | --- | --- |
-| Log on | Touch screen → User ID → password or BioID | "Welcome! Please Enter:" User ID + password, or fingerprint (hold 2 s). **Short List**: after your first log-on of the shift, a fingerprint alone logs you on. Strong passwords (6–18 characters, 3 of 4 character types). |
-| Home | Tiles: My Patients, All Available Patients, … | Patient list opens directly: **Global / Local / Partial Dose / My Patients** tabs. Main Menu: Patient Care, Reports, Resolve Discrep, User Menus |
-| Taking meds out | Select patient → **Remove** → Due Now / PRN / All Orders | Select patient → **Remove Meds** → Scheduled Meds / PRN Only / Active / Inactive Med Orders / Stocked Meds → **Remove Now** |
-| Controlled count | **Blind count** before removing | **Countback**: quantity remaining *after* removing |
-| Override | Override button → override list → reason at Remove Meds | **Stocked Meds** tab → "Do you wish to override?" → reason (Emergency Situation, MD Order, Patient Condition, Pharmacy Not Available) |
-| Waste | Waste Now / Waste Later → Undocumented Waste | **Waste Partial Dose** during the issue, or **Close Bin** → Partial Dose List → Waste Meds (Outstanding Issued Amount, Administration Amount, Waste Amount, Waste Reason) |
-| Return | Return → return bin | **Return Meds** → Meds Eligible to Return (your open PMAs) → Administration Amount + Quantity to Return → Return Now |
-| Discrepancy | Discrepancies tile → investigate, recount, reason, witness | **Resolve Discrep** → Transaction History, Cycle Count, List of Resolve Reasons → witness |
+| Log on | Touch screen → User ID → fingerprint (or password) | "Welcome! Please Enter:" User ID + fingerprint (hold about 2 s) or password |
+| Home | My Patients / All Available Patients | Patient list: Global / Local / Partial Dose / My Patients tabs; Main Menu |
+| Taking meds out | Patient → **Remove** → Due Now / PRN / All Orders | Patient → **Remove Meds** → Scheduled Meds / PRN Only / Active / Inactive / Stocked Meds → **Remove Now** |
+| Controlled count | **Blind count** before removing | **Countback** (quantity remaining) after removing |
+| Override | Override → reason at Remove Med | **Stocked Meds** tab → "Do you wish to override?" → reason |
+| Waste | Waste Now / Waste Later | **Waste Partial Dose** or Close Bin → Partial Dose List → Waste Meds |
 | Log off | Sign Out | **Exit** |
 
-## What students can practice
-
-| Skill | What happens in the simulator |
-| --- | --- |
-| **Sign in** | Standby screen → User ID → password or **BioID**. First sign-in forces a password change (6–8 letters/numbers), as described in the training manual. |
-| **BioID fingerprint** | Enroll with 3 scans on a simulated scanner (press and hold). Lifting early fails the scan; 3 failures fall back to password. On phones/laptops with a fingerprint reader or Face ID, students can also link the **device's real biometrics** (WebAuthn, stays on the device). |
-| **My Patients / All Available Patients** | Build an assignment list. The list shows blue due-now dots, orange past-due bars, allergy and **Name Alert** flags (two patients named Thompson). |
-| **Remove from profile** | Due Now / PRN / All Orders tabs, Selected Meds column, early-dose, double-dose and PRN "too soon" warnings. |
-| **Clinical Data (CDC) prompts** | Apical pulse for digoxin, HR/BP for metoprolol, pain score and RR for opioids, blood glucose for insulin. Hold parameters trigger a hold warning. |
-| **Range doses** | Enter the amount to administer; it must fall inside the ordered range. |
-| **Override** | Striped override list, override reason, **Order Exists** warning, and an **allergy alert** (morphine for a morphine-allergic patient). |
-| **Drawer / blind count** | Cabinet graphic lights the drawer and pocket. Controlled substances require a blind count of the items shown. Two mismatched counts create a discrepancy. |
-| **Waste** | Waste Now or Waste Later with a witness who signs in with their own credentials. A reason is required when the amount differs from expected. Undocumented waste shows on the Home screen. |
-| **Return** | Return unopened items to the return bin (witness required for controlled substances). |
-| **Discrepancies** | Investigate recent transactions, recount, pick a reason, comment and have a witness co-sign. |
-| **Temporary patients** | Pyxis *Add Temporary Patient* / Omnicell *Add New Patient*: last name and room required, DOB all-or-nothing, duplicate-ID check, TEMPORARY/TMP flag. Medications come out on override. |
-| **System kits** | Hypoglycemia Rescue, Opioid Reversal and Anaphylaxis kits (Pyxis *System Kits*, Omnicell *Remove Kits*). Kits count as an override on a profiled cabinet. |
-| **Nurse-prepared orders** | Selecting the order selects every component (drug + diluent); dose can't be changed; Component Details; skipping a component is a partial issue. |
-| **Anywhere RN** (Omnicell) | A nurses' station window to create issue/return requests for My Patients; at log-on the cabinet shows the pending requests (Issue / Return / Proceed with Login) and a Notice of Incomplete Items when needed. |
-| **Global Find & Reports** | Locate any medication; activity report by current user or the whole device (copy or print). |
+Counts in controlled-substance pockets are **random** every time, so students have to actually count.
 
 ## Ways to practice (Practice Coach → Mode)
 
-Same structure as the IV Pump Practice Lab:
-
-- **Practice mode: random tasks** — an endless stream of tasks drawn from the unit's patients: scheduled and PRN meds, controlled substances with blind count/countback and waste, emergency overrides, returns, and **safety checks you should refuse** (hold parameters, allergy, PRN too soon, low respiratory rate). Filter by task type. Your work is checked automatically when the removal or return finishes; a results table shows *Task needs* vs *You did*, with the waste math. **Can't give: hold and clarify**, **Show the answer** (step-by-step for the selected cabinet) and **Skip** buttons, plus a score, streak and best streak.
-- **Check-off: 5 random tasks** — one task of each type, one attempt each, no answers; ends with a percent score and a **Copy results for instructor** button.
+- **Practice mode: random tasks** — an endless stream of tasks: scheduled and PRN meds, controlled substances with count and waste, emergency overrides, returns, and **safety checks to refuse** (morphine for a patient allergic to it, a PRN requested too soon, a scheduled dose that was already removed). Filter by task type. Work is graded automatically when the removal or return finishes, with a *Task needs* vs *You did* table and the waste math. Buttons: **Can't give: hold and clarify**, **Show the answer**, **Skip**. Score, streak and best streak are kept.
 - **Free practice** — no checklist; the **Event history** shows everything the cabinet recorded.
-- **Guided scenarios** — 18 scenarios with a checklist and progress bar, hints revealed one at a time, safety-error detection, and a nursing **debrief**.
+- **Guided scenarios** — checklist with progress bar, hints revealed one at a time, safety-error detection, and a debrief:
+  1. Beginner — Remove a scheduled oral med (digoxin)
+  2. Beginner — Several scheduled meds at once
+  3. Intermediate — Controlled substance: remove + waste the partial dose (morphine 2 mg from a 4 mg/mL Carpuject)
+  4. Intermediate — Nurse-prepared med order (cefTRIAXone vial + sterile water diluent)
+  5. Advanced — Emergency override (naloxone), with a Name Alert
 
-## Guided scenarios
+Also in free practice: returns, kits, temporary patients (Add Temporary Patient / Add New Patient), and discrepancy resolution.
 
-The **Practice Coach** panel walks through 18 scenarios with step checklists, hints, safety-error detection and a copyable result for instructors:
+## Phones and tablets
 
-1. Sign in & build My Patients
-2. Remove a scheduled oral med (digoxin with apical pulse CDC)
-3. Controlled substance: remove + Waste Now (morphine 2 mg from a 4 mg/mL Carpuject)
-4. Range dose (HYDROmorphone 0.4 mg, waste 0.6 mg)
-5. Emergency override (naloxone), with a Name Alert trap
-6. Waste Later & resolve undocumented waste (LORazepam)
-7. Return an unused controlled med (oxyCODONE)
-8. Safety stop: allergy alert on override
-9. Hold parameter: metoprolol (HR 54, SBP 98)
-10. Blind count discrepancy (fentaNYL pocket is one short)
-11. Add a temporary patient (ADT downtime) and override ondansetron
-12. Remove a system kit (Hypoglycemia Rescue Kit)
-13. Nurse-prepared med order (cefTRIAXone vial + sterile water diluent)
-14. Anywhere RN remote request (Omnicell only)
-15. PRN too soon (morphine) — cancel at the last-dose warning
-16. Past-due dose (enoxaparin)
-17. Name alert: Roberta Thompson's HYDROmorphone (waste 0.8 mg)
-18. Several scheduled meds at once
-
-**Dosage-calculation challenge** (Coach → Settings) hides the calculated waste, so students must work out the amount and the volume (amount ÷ concentration) themselves.
-
-## Practice accounts
-
-The user ID and password are printed under each box on the sign-in screens, so there is nothing to remember and nothing to reset.
-
-| Role | User ID | Password |
-| --- | --- | --- |
-| Student | `student` | `nurse1` |
-| Witness RN | `kjones` | `pyxis1` |
-| Witness RN | `mlee` | `pyxis2` |
-
-Progress (score, streak, scenario results) is saved in the student's own browser. **Coach → Settings → Reset** clears it.
+Large touch targets, no double-tap zoom, a bigger fingerprint scanner, full-width dialog buttons on phones, and **haptics** — short vibrations on taps, fingerprint scans, drawers opening and alerts (Android browsers; iPhone and iPad browsers do not allow vibration). Haptics can be turned off under **Coach → Settings**.
 
 ## Running it
 
-It is a static site: open `index.html` in a browser, or serve the folder:
+It is a static site: open `index.html`, or serve the folder (`python3 -m http.server 8000`). To publish for a class, turn on **GitHub Pages** (Settings → Pages → Deploy from a branch → `main`, `/ (root)`).
 
-```bash
-python3 -m http.server 8000
-# then visit http://localhost:8000
-```
-
-To publish for a class, turn on **GitHub Pages** (repository **Settings → Pages → Deploy from a branch**, folder `/ (root)`). Device biometrics (fingerprint/Face ID) require HTTPS, which GitHub Pages provides.
+Progress (score, streak, scenario results) is saved in each student's own browser. **Coach → Settings → Reset** clears it.
 
 ## Project layout
 
 ```
 index.html       page shell
-css/styles.css   device and coach styling (responsive, light/dark page chrome)
-js/data.js       formulary, fictional patients and orders, practice users, scenarios
-js/app.js        screens, workflows, BioID, scenario engine
+css/styles.css   cabinet and coach styling (responsive, light/dark page chrome)
+js/data.js       formulary, fictional patients and orders, kits, scenarios, debriefs
+js/app.js        screens, workflows, practice tasks, scenario engine
 ```
-
-To add patients, medications or scenarios, edit `js/data.js`. Each scenario step has a `match` function that listens for events such as `removed`, `waste`, `returned`, `allergy_alert` or `signout`.
