@@ -45,7 +45,6 @@ button { font: inherit; }
 .tb-device span { font-size: 12px; opacity: .8; }
 .tb-clock { display: flex; flex-direction: column; align-items: center; line-height: 1.1; margin-inline: auto; }
 .tb-clock .clock { font-family: var(--f-mono); font-size: 28px; font-weight: 700; letter-spacing: .02em; }
-.clock small { font-size: .6em; opacity: .75; font-weight: 600; }
 .tb-date { font-size: 12.5px; }
 .tb-date { font-size: 11.5px; opacity: .8; }
 .tb-user { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }

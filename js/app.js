@@ -285,7 +285,7 @@ function renderTopbar() {
     </div>`;
 }
 // Live clocks: every element with class "clock" ticks each second.
-function clockText(t, fmt) { const d = new Date(t); return fmt === 'colon' ? `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` : `${pad(d.getHours())}${pad(d.getMinutes())}<small>:${pad(d.getSeconds())}</small>`; }
+function clockText(t) { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 setInterval(() => { const now = Date.now(); document.querySelectorAll('.clock[data-fmt]').forEach(c => { c.innerHTML = clockText(now, c.dataset.fmt); }); }, 1000);
 
 function go(screen, extra = {}) { Object.assign(session, extra); session.screen = screen; render(); }

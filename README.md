@@ -28,7 +28,7 @@ Switch at the top of the **Practice Coach**. Patients, medications and scenarios
 
 Counts in controlled-substance pockets are **random** every time, so students have to actually count.
 
-**Real time.** The cabinet uses the device's real clock (shown large, with seconds, on the cabinet and in the coach). Scheduled doses are due at the hour nearest to when the student starts (on time within ±60 minutes), one dose is two hours past due, and later doses are hours ahead. Scenario and task text show the actual due time, and PRN intervals, "last removed" alerts and transaction times all use real minutes.
+**Real time.** The cabinet uses the device's real clock (shown large as HH:MM on the cabinet and in the coach). Scheduled doses are due at the hour nearest to when the student starts (on time within ±60 minutes), one dose is two hours past due, and later doses are hours ahead. Scenario and task text show the actual due time, and PRN intervals, "last removed" alerts and transaction times all use real minutes.
 
 ## Ways to practice (Practice Coach → Mode)
 
