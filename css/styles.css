@@ -44,7 +44,9 @@ button { font: inherit; }
 .tb-device b { letter-spacing: .06em; }
 .tb-device span { font-size: 12px; opacity: .8; }
 .tb-clock { display: flex; flex-direction: column; align-items: center; line-height: 1.1; margin-inline: auto; }
-.tb-clock .clock { font-family: var(--f-mono); font-size: 20px; font-weight: 600; }
+.tb-clock .clock { font-family: var(--f-mono); font-size: 28px; font-weight: 700; letter-spacing: .02em; }
+.clock small { font-size: .6em; opacity: .75; font-weight: 600; }
+.tb-date { font-size: 12.5px; }
 .tb-date { font-size: 11.5px; opacity: .8; }
 .tb-user { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .tb-name { font-size: 13.5px; opacity: .92; }
@@ -322,7 +324,8 @@ table.tx { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .dev-omnicell .btn.danger { color: #8c1d16; }
 .dev-omnicell .content .btn, .dev-omnicell .modal .btn { width: auto; min-height: 44px; padding: 8px 16px; }
 .dev-omnicell .topbar { grid-area: foot; margin: 10px -10px 0; min-height: 44px; background: linear-gradient(#444, #0e0e0e); color: #fff; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 14px; flex-wrap: nowrap; }
-.of-time { font-family: var(--f-mono); font-size: 13px; }
+.of-time { font-family: var(--f-mono); font-size: 15px; font-weight: 700; }
+.of-time .clock { font-size: 18px; }
 .of-brand { font-style: italic; font-weight: 700; color: #b5e07f; letter-spacing: .02em; }
 .of-user { font-weight: 700; font-size: 13.5px; margin-left: auto; }
 .dev-omnicell .topbar .of-exit { width: auto; min-height: 34px; padding: 4px 24px; background: linear-gradient(#6a6a6a, #262626); color: #fff; border-color: #111; }
@@ -566,6 +569,18 @@ button, .btn, .orow, .mrow, .dot, .otab, [data-scanner] { touch-action: manipula
   .dev-omnicell .otab { min-height: 44px; font-size: 13px; }
   .o-brand { font-size: 22px; }
 }
+/* Current-time displays */
+.now-card { display: grid; gap: 4px; margin: 12px 0 4px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); border-left: 5px solid var(--accent); }
+.now-card > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.now-lbl { font-size: 11.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.now-time { font-family: var(--f-mono); font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.now-card p { margin: 0; font-size: 13px; color: var(--muted); }
+.now-card p b { color: var(--ink); }
+.now-line { margin: 0 0 8px; font-size: 13.5px; color: var(--s-muted); }
+.now-line b { font-family: var(--f-mono); color: var(--s-ink); font-size: 16px; }
+.hintbar .clock { font-family: var(--f-mono); }
+@media (max-width: 640px) { .tb-clock .clock { font-size: 24px; } .tb-date { display: none; } }
+
 /* Witness card */
 .witness-card { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--s-line); border-radius: 10px; background: #f6f9fc; margin: 10px 0; }
 .witness-card b { display: block; font-size: 16px; }

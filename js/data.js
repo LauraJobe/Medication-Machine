@@ -142,7 +142,7 @@ const KITS = [
 
 const SCENARIOS = [
   { id: 's2', title: 'Remove a scheduled oral med', level: 'Beginner', patient: 'P1',
-    brief: 'It is time for <b>Harold Jenkins\'</b> 0900 medications. Remove his scheduled <b>digoxin 0.125 mg PO</b> from his medication profile.',
+    brief: 'It is time for <b>Harold Jenkins\'</b> {DUE} medications. Remove his scheduled <b>digoxin 0.125 mg PO</b> from his medication profile.',
     steps: [
       { text: 'Sign in', hint: 'Type <b>student</b>, then hold your finger on the fingerprint scanner.', match: e => e.type === 'signin' },
       { text: 'Select Harold Jenkins and choose <b>Remove</b>', hint: 'My Patients or All Available Patients → tap Jenkins → Remove.', match: e => e.type === 'patient_action' && e.patient === 'P1' && e.action === 'remove' },
@@ -168,7 +168,7 @@ const SCENARIOS = [
       { text: 'Sign out', match: e => e.type === 'signout' },
     ] },
   { id: 's13', title: 'Nurse-prepared med order (cefTRIAXone)', level: 'Intermediate', patient: 'P3',
-    brief: 'It is time for <b>Evelyn Carter\'s</b> 0900 <b>cefTRIAXone 1 g IV</b>. It is a <b>nurse-prepared</b> order: you remove the drug vial and the <b>10 mL sterile water</b> diluent, then reconstitute at the bedside per policy. Remove both components.',
+    brief: 'It is time for <b>Evelyn Carter\'s</b> {DUE} <b>cefTRIAXone 1 g IV</b>. It is a <b>nurse-prepared</b> order: you remove the drug vial and the <b>10 mL sterile water</b> diluent, then reconstitute at the bedside per policy. Remove both components.',
     steps: [
       { text: 'Open Carter → <b>Remove</b> and select the nurse-prepared cefTRIAXone order', hint: 'Selecting the order selects every component. Review the components before you continue.', match: e => e.type === 'nurseprep_selected' && e.order === 'o301' },
       { text: 'Remove the cefTRIAXone 1 g vial', match: e => e.type === 'removed' && e.med === 'ceftriaxone_inj' && e.patient === 'P3' },
@@ -176,7 +176,7 @@ const SCENARIOS = [
       { text: 'Sign out', match: e => e.type === 'signout' },
     ] },
   { id: 's18', title: 'Several scheduled meds at once', level: 'Beginner', patient: 'P4',
-    brief: 'It is time for <b>Robert Thompson\'s</b> 0900 medications: <b>ceFAZolin 2 g IV</b>, <b>enoxaparin 30 mg subcut</b> and <b>acetaminophen 650 mg PO</b>. Select all three, then remove them in one transaction.',
+    brief: 'It is time for <b>Robert Thompson\'s</b> {DUE} medications: <b>ceFAZolin 2 g IV</b>, <b>enoxaparin 30 mg subcut</b> and <b>acetaminophen 650 mg PO</b>. Select all three, then remove them in one transaction.',
     steps: [
       { text: 'Open Robert Thompson → <b>Remove</b>', match: e => e.type === 'patient_action' && e.patient === 'P4' && e.action === 'remove' },
       { text: 'Select all three due medications, then remove them together', hint: 'Tap each medication so it appears in the selected list before you start removing.', match: e => e.type === 'txn_done' && e.patient === 'P4' && ['cefazolin_inj', 'enoxaparin_30', 'apap_tab'].every(m => e.meds.includes(m)) },

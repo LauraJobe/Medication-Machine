@@ -60,7 +60,7 @@ const OMNI_TEXT = [
   [/Sign out of the MedStation/g, 'Press Exit to log off'], [/Sign out/g, 'Press Exit to log off'], [/sign out/g, 'press Exit to log off'], [/Sign in/g, 'Log on'], [/sign in/g, 'log on'],
   [/MedStation/g, 'cabinet'],
 ];
-const devText = h => D().key === 'omnicell' ? OMNI_TEXT.reduce((t, [a, b]) => t.replace(a, b), h) : h;
+const devText = h => { h = String(h).replace(/\{DUE\}/g, hhmm(dueHourMs())); return D().key === 'omnicell' ? OMNI_TEXT.reduce((t, [a, b]) => t.replace(a, b), h) : h; };
 
 /* ---------- persistent state ---------- */
 let db;
@@ -85,7 +85,7 @@ if (!db.settings.device) db.settings.device = 'pyxis';
 if (!db.tempPatients) db.tempPatients = [];
 // Practice passwords never change: always restore the published ones.
 for (const [id, u] of Object.entries(USERS)) db.users[id] = { ...(db.users[id] || u), password: u.password, bioid: true, mustChange: false };
-if (Date.now() - db.base > 10 * HOUR) { db.base = Date.now(); db.orders = {}; }
+if (Date.now() - db.base > 30 * MIN) { db.base = Date.now(); db.orders = {}; }
 
 const session = { user: null, screen: 'standby', listTab: 'my', sel: null, mode: 'remove', tab: 'due', cart: [], reportAll: false };
 
@@ -269,7 +269,7 @@ function renderTopbar() {
   const now = Date.now();
   if (D().key === 'omnicell') {
     const d = new Date(now), u = session.user;
-    return `<span class="of-time"><span class="clock">${pad(d.getHours())}:${pad(d.getMinutes())}</span> ${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${String(d.getFullYear()).slice(2)}</span>
+    return `<span class="of-time"><span class="clock" data-fmt="colon">${clockText(now, 'colon')}</span> ${pad(d.getMonth() + 1)}/${pad(d.getDate())}/${String(d.getFullYear()).slice(2)}</span>
       <span class="of-brand">Color Touch · ${D().station}</span><span class="of-user">${u ? esc(`${db.users[u].first} ${db.users[u].last}`) : ''}</span>
       <button class="btn of-exit" data-act="${u ? 'signout' : 'noop'}"${u ? '' : ' disabled'}>Exit</button>`;
   }
@@ -277,14 +277,16 @@ function renderTopbar() {
   const undoc = u ? undocFor(u).length : 0;
   const disc = db.discrepancies.filter(d => !d.resolved).length;
   return `<div class="tb-device"><b>${D().station}</b><span>${D().name} · 4 West Med-Surg</span></div>
-    <div class="tb-clock"><span class="clock">${hhmm(now)}</span><span class="tb-date">${dateStr(now)}</span></div>
+    <div class="tb-clock" aria-label="Current time"><span class="clock" data-fmt="mil">${clockText(now, 'mil')}</span><span class="tb-date">${dateStr(now)}</span></div>
     <div class="tb-user">
       ${disc ? `<button class="ind ind-disc" data-act="go" data-to="disc" title="Unresolved discrepancy" aria-label="Unresolved discrepancies: ${disc}">Δ ${disc}</button>` : ''}
       ${undoc ? `<button class="ind ind-waste" data-act="go" data-to="undoc" title="${T('undoc')}" aria-label="${T('undoc')}: ${undoc}">W ${undoc}</button>` : ''}
       ${u ? `<span class="tb-name">${esc(userName(u))}</span><button class="btn small ghost" data-act="home">Home</button><button class="btn small signout" data-act="signout">Sign Out</button>` : ''}
     </div>`;
 }
-setInterval(() => { const c = topbar.querySelector('.clock'); if (c) { const d = new Date(); c.textContent = D().key === 'omnicell' ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : hhmm(d); } }, 15000);
+// Live clocks: every element with class "clock" ticks each second.
+function clockText(t, fmt) { const d = new Date(t); return fmt === 'colon' ? `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` : `${pad(d.getHours())}${pad(d.getMinutes())}<small>:${pad(d.getSeconds())}</small>`; }
+setInterval(() => { const now = Date.now(); document.querySelectorAll('.clock[data-fmt]').forEach(c => { c.innerHTML = clockText(now, c.dataset.fmt); }); }, 1000);
 
 function go(screen, extra = {}) { Object.assign(session, extra); session.screen = screen; render(); }
 function render() {
@@ -301,14 +303,20 @@ function render() {
   renderCoach();
 }
 
-/* ---------- order status ---------- */
+/* ---------- order status (real clock) ----------
+ * Scheduled doses fall on the hour nearest to when the student started ("due now"),
+ * a past-due dose two hours earlier, and later doses whole hours ahead.
+ * A dose is on time within 60 minutes of its scheduled time. */
+function dueHourMs() { const d = new Date(db.base); d.setMinutes(d.getMinutes() >= 30 ? 60 : 0, 0, 0); return d.getTime(); }
+function dueTime(o) { const h = o.dueIn < -30 ? -2 : Math.round(o.dueIn / 60); return dueHourMs() + h * HOUR; }
+function refreshShift() { if (Date.now() - db.base > 30 * MIN) { db.base = Date.now(); db.orders = {}; } }
 function orderStatus(o) {
   const st = db.orders[o.id] || {};
   if (o.prn) return { kind: 'prn', last: st.lastRemoved, by: st.by };
-  const due = db.base + o.dueIn * MIN;
+  const due = dueTime(o);
   if (st.given) return { kind: 'given', due, at: st.given, by: st.by };
   const diff = (due - Date.now()) / MIN;
-  if (diff < -30) return { kind: 'pastdue', due };
+  if (diff < -60) return { kind: 'pastdue', due };
   if (diff <= 60) return { kind: 'due', due };
   return { kind: 'future', due };
 }
@@ -472,6 +480,7 @@ const SCREENS = {
       <div class="profile">
         <section class="plist">
           ${!ov ? `<div class="seg small" role="tablist">${[['due', T('due')], ['prn', 'PRN'], ['all', 'All Orders']].map(([k, l]) => `<button class="${session.tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}" role="tab" aria-selected="${session.tab === k}">${l}</button>`).join('')}</div>` : ''}
+          ${!ov ? `<p class="now-line">Now <b class="clock" data-fmt="mil">${clockText(Date.now(), 'mil')}</b> · scheduled doses are on time within 60 minutes of the due time</p>` : ''}
           <input type="search" id="medsearch" placeholder="Type the first 3 letters of the medication" data-filter aria-label="Search medications">
           <div class="mlist">${listHtml}</div>
         </section>
@@ -1112,7 +1121,7 @@ const OMNI = {
     const tabs = [['display', 'Display Meds to Remove'], ['stocked', 'Stocked Meds'], ['active', 'Active Med Orders'], ['inactive', 'Inactive Med Orders'], ['prn', 'PRN Only'], ['sched', 'Scheduled Meds']];
     return { title: oTitle(`Remove Meds for: ${esc(p.last)}, ${esc(p.first)}`, p), body: `<input type="search" id="medsearch" class="o-search" placeholder="Type the first letters of the medication" data-filter aria-label="Search medications">
         <div class="olist">${listHtml || '<p class="empty-line">No items on this tab.</p>'}</div>`,
-      hint: tab === 'stocked' ? 'Stocked Meds: every item in this cabinet. Selecting an item that is not on the patient\'s active med orders is an OVERRIDE.' : 'Select the medication to remove. Any med order displayed in grey is not available. Deselect an item by pressing the quantity indicator to the left of any selected item.',
+      hint: (tab === 'stocked' ? '' : `Now <span class="clock" data-fmt="colon">${clockText(Date.now(), 'colon')}</span> — scheduled doses are due at ${hhmm(dueHourMs())}. `) + (tab === 'stocked' ? 'Stocked Meds: every item in this cabinet. Selecting an item that is not on the patient\'s active med orders is an OVERRIDE.' : 'Select the medication to remove. Any med order displayed in grey is not available. Deselect an item by pressing the quantity indicator to the left of any selected item.'),
       tabs: tabs.map(([k, l]) => `<button type="button" class="otab${tab === k ? ' on' : ''}" data-act="otab" data-t="${k}">${l}</button>`).join(''),
       left: cart.length ? oSide([['Cancel Med List', 'data-act="cancelMedList"', 'red']]) : oSide([['Previous Screen', 'data-act="go" data-to="pt"', 'back']]),
       footer: oSide([['Remove Now', `data-act="removeMeds"${cart.length ? '' : ' disabled'}`, 'go']]) };
@@ -1544,7 +1553,7 @@ const TASKGEN = {
   routine: [
     () => { const oid = pickOne(['o101', 'o102', 'o103', 'o104', 'o105', 'o204', 'o205', 'o206', 'o403', 'o404', 'o405', 'o502', 'o504']), { o, p } = ordOf(oid);
       return { cat: 'routine', kind: 'remove', patient: p.id, med: o.med, orderId: oid, dose: o.dose, tab: 'due',
-        text: `It is time for ${who(p.id)}'s scheduled <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Remove the dose.` }; },
+        text: `It is time for ${who(p.id)}'s scheduled <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>, due at <b>${hhmm(dueTime(o))}</b>. Remove the dose.` }; },
     () => { const c = pickOne([{ oid: 'o106', why: 'has a fever and a headache' }, { oid: 'o108', why: 'is nauseated and has vomited' }, { oid: 'o203', why: 'is nauseated' }, { oid: 'o306', why: 'is wheezing' }, { oid: 'o307', why: 'reports mild pain' }]), { o, p } = ordOf(c.oid);
       return { cat: 'routine', kind: 'remove', patient: p.id, med: o.med, orderId: c.oid, dose: o.dose, tab: 'prn',
         text: `${who(p.id)} ${c.why}. Order: <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b>. Remove one dose.` }; },
@@ -1582,13 +1591,14 @@ const TASKGEN = {
     () => { const c = pickOne(['o405', 'o502', 'o105', 'o205']), { o, p } = ordOf(c), mins = rint(20, 50);
       return { cat: 'safety', kind: 'hold', patient: p.id, med: o.med, orderId: c, dose: o.dose, tab: 'all',
         seed: () => seedRemoval({ patient: p.id, med: o.med, orderId: c, dose: o.dose, minsAgo: mins }),
-        text: `A classmate asks you to get ${who(p.id)}'s 0900 <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b> "because nobody has given it yet."`, holdWhy: `This dose was already removed ${mins} minutes ago. Removing it again could cause a double dose — check the eMAR and ask who removed it.` }; },
+        text: `A classmate asks you to get ${who(p.id)}'s ${hhmm(dueTime(o))} <b>${esc(medLabel(o.med))} ${esc(sig(o))}</b> "because nobody has given it yet."`, holdWhy: `This dose was already removed ${mins} minutes ago. Removing it again could cause a double dose — check the eMAR and ask who removed it.` }; },
   ],
 };
 function genTask(cat) { const pool = cat && cat !== 'all' ? TASKGEN[cat] : Object.values(TASKGEN).flat(); return pickOne(pool)(); }
 
 let PX = { task: null, events: [], result: null, held: false, showAnswer: false };
 function newTask(same = false, quiet = false) {
+  refreshShift();
   const t = same && PX.task ? PX.task : genTask(db.pfilter || 'all');
   cancelFlows(); session.cart = [];
   if (t.orderId) delete db.orders[t.orderId];
@@ -1754,6 +1764,8 @@ function renderCoach() {
   const mode = db.mode || 'practice';
   const sel = mode === 'scen' && db.scen ? db.scen.id : mode;
   let html = `<div class="coach-head"><h2>Practice Coach</h2><button class="btn small ghost only-narrow" data-cact="toDevice">Back to cabinet ↑</button></div>
+    <div class="now-card"><div><span class="now-lbl">Current time</span><span class="now-time clock" data-fmt="mil">${clockText(Date.now(), 'mil')}</span></div>
+      <p>Scheduled doses are due at <b>${hhmm(dueHourMs())}</b>; on time from ${hhmm(dueHourMs() - HOUR)} to ${hhmm(dueHourMs() + HOUR)}. The sim uses your device's real time.</p></div>
     <div class="dev-switch" role="radiogroup" aria-label="Cabinet type">${Object.values(DEVICES).map(d => `<button role="radio" aria-checked="${D().key === d.key}" class="${D().key === d.key ? 'on' : ''}" data-cact="device" data-dev="${d.key}"><b>${d.key === 'pyxis' ? 'Pyxis' : 'Omnicell'}</b><span>${d.key === 'omnicell' ? 'Omnicell XT · Color Touch' : 'Pyxis MedStation ES'}</span></button>`).join('')}</div>
     <div class="picker"><label for="modeSel">Mode</label><select id="modeSel">
       <option value="practice"${sel === 'practice' ? ' selected' : ''}>Practice mode: random tasks</option>

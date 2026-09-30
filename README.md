@@ -28,6 +28,8 @@ Switch at the top of the **Practice Coach**. Patients, medications and scenarios
 
 Counts in controlled-substance pockets are **random** every time, so students have to actually count.
 
+**Real time.** The cabinet uses the device's real clock (shown large, with seconds, on the cabinet and in the coach). Scheduled doses are due at the hour nearest to when the student starts (on time within ±60 minutes), one dose is two hours past due, and later doses are hours ahead. Scenario and task text show the actual due time, and PRN intervals, "last removed" alerts and transaction times all use real minutes.
+
 ## Ways to practice (Practice Coach → Mode)
 
 - **Practice mode: random tasks** — an endless stream of tasks: scheduled and PRN meds, controlled substances with count and waste, emergency overrides, returns, and **safety checks to refuse** (morphine for a patient allergic to it, a PRN requested too soon, a scheduled dose that was already removed). Filter by task type. Work is graded automatically when the removal or return finishes, with a *Task needs* vs *You did* table and the waste math. Buttons: **Can't give: hold and clarify**, **Show the answer**, **Skip**. Score, streak and best streak are kept.
